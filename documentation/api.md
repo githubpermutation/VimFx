@@ -784,13 +784,10 @@ The function must return `null` or a string like the `type` parameter.
 
 ## Stability
 
-The API is currently **experimental** and therefore **unstable.** Things might
-break with new VimFx versions. However, no breaking changes are planned, and
-will be avoided if feasible.
+The API is considered **stable.**
 
-As soon as VimFx 1.0.0 (which does not seem to be too far away) is released
-backwards compatibility will be a priority and won’t be broken until VimFx
-2.0.0.
+Backwards compatibility is a priority and won’t be broken until VimFx 2.0.0.
+Bumping the major version number will be avoided.
 
 [option overrides]: #vimfxaddoptionoverridesrules
 [`vimfx.send(...)`]: #vimfxsendvim-message-data--null-callback--null
