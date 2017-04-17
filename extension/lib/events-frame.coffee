@@ -1,5 +1,5 @@
 ###
-# Copyright Simon Lydell 2015, 2016.
+# Copyright Simon Lydell 2015, 2016, 2017.
 #
 # This file is part of VimFx.
 #
@@ -95,7 +95,7 @@ class FrameEventManager
 
       if target == @vim.content.document
         messageManager.send('frameCanReceiveEvents', false)
-        @vim.enterMode('normal') if @vim.mode == 'hints'
+        @vim._enterMode('normal') if @vim.mode == 'hints'
 
       # If the target isn’t the topmost document, it means that a frame has
       # changed: It could have been removed or its `src` attribute could have
@@ -113,6 +113,21 @@ class FrameEventManager
         }
       )
       callback(diffs)
+    )
+
+    messageManager.listen('highlightMarkableElements', (data) =>
+      {elements, strings} = data
+      utils.clearSelectionDeep(@vim.content)
+      for {elementIndex, selectAll} in elements
+        {element} = @vim.state.markerElements[elementIndex]
+        if selectAll
+          utils.selectElement(element)
+        else
+          for string in strings
+            utils.selectAllSubstringMatches(
+              element, string, {caseSensitive: false}
+            )
+      return
     )
 
     @listen('overflow', (event) =>
@@ -153,7 +168,10 @@ class FrameEventManager
         # There is no need to take `ignore_keyboard_layout` and `translations`
         # into account here, since we want to override the _native_ `<tab>`
         # behavior. Then, `event.key` is the way to go. (Unless the prefs are
-        # customized. YAGNI until requested.)
+        # customized. YAGNI until requested.) Also, since 'keydown' is fired so
+        # often the options are read directly from the prefs system for
+        # performance. That means you can’t override them with
+        # `vimfx.addOptionOverrides`. YAGNI until requested.
         keyStr = notation.stringify(event)
         direction = switch keyStr
           when ''
@@ -182,6 +200,8 @@ class FrameEventManager
       # Clicks are always counted as page interaction. Listen for 'mousedown'
       # instead of 'click' to mark the interaction as soon as possible.
       @vim.markPageInteraction()
+
+      @vim.hideNotification()
     )
 
     messageManager.listen('browserRefocus', =>
@@ -209,10 +229,16 @@ class FrameEventManager
       # event below).
       if target == @vim.content.document
         if @vim.state.shouldRefocus
-          @vim.state.hasInteraction = true
-          @vim.state.shouldRefocus = false
+          @vim.markPageInteraction(true)
+          # When Firefox is re-focused after using a keyboard shortcut to switch
+          # keyboard layout in GNOME, _two_ focus events for the document are
+          # triggered, about 50ms apart. Therefore, reset the `shouldRefocus`
+          # after a timeout.
+          @vim.content.setTimeout((=>
+            @vim.state.shouldRefocus = false
+          ), prefs.get('refocus_timeout'))
         else
-          @vim.state.hasInteraction = false
+          @vim.markPageInteraction(false)
         return
 
       if utils.isTextInputElement(target)
@@ -222,11 +248,17 @@ class FrameEventManager
         @vim.state.hasFocusedTextInput = true
 
         if @vim.mode == 'caret' and not utils.isContentEditable(target)
-          @vim.enterMode('normal')
+          @vim._enterMode('normal')
+
+      # When moving a tab to another window, there is a short period of time
+      # when there’s no listener for this call.
+      return unless options = @vim.options(
+        ['prevent_autofocus', 'prevent_autofocus_modes']
+      )
 
       # Blur the focus target, if autofocus prevention is enabled…
-      if prefs.get('prevent_autofocus') and
-         @vim.mode in prefs.get('prevent_autofocus_modes').split(/\s+/) and
+      if options.prevent_autofocus and
+         @vim.mode in options.prevent_autofocus_modes and
          # …and the user has interacted with the page…
          not @vim.state.hasInteraction and
          # …and the event is programmatic (not caused by clicks or keypresses)…
@@ -247,7 +279,11 @@ class FrameEventManager
     @listen('blur', (event) =>
       target = event.originalTarget
 
-      @vim.clearHover() if target == @vim.state.lastHoveredElement
+      if target == @vim.state.lastHover.element and
+         # Facebook “like” button exception. The “emoji picker” immediately
+         # closes otherwise.
+         not target.classList?.contains('UFILikeLink')
+        @vim.clearHover()
 
       @vim.content.setTimeout((=>
         @sendFocusType()
@@ -269,6 +305,10 @@ class FrameEventManager
           unless @vim.state.shouldRefocus or @keepInputs
             commands.clear_inputs({@vim})
         )
+    )
+
+    @listen('popstate', =>
+      @vim.markPageInteraction(false)
     )
 
     messageManager.listen('checkFocusType', @sendFocusType.bind(this))

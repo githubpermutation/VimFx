@@ -19,50 +19,50 @@ In `config.js`, the following API is available as the variable `vimfx`.
 
 ### `vimfx.get(...)`, `vimfx.getDefault(...)` and `vimfx.set(...)`
 
-Gets or sets the (default) value of a VimFx pref.
+Gets or sets the (default) value of a VimFx option.
 
-You can see all prefs in [defaults.coffee], or by opening [about:config] and
+You can see all options in [defaults.coffee], or by opening [about:config] and
 filtering by `extensions.vimfx`. Note that you can also access the [special
 options], which may not be accessed in [about:config], using `vimfx.get(...)`
 and `vimfx.set(...)`—in fact, this is the _only_ way of accessing those options.
 
-#### `vimfx.get(pref)`
+#### `vimfx.get(option)`
 
-Gets the value of the VimFx pref `pref`.
+Gets the value of the VimFx option `option`.
 
 ```js
-// Get the value of the Hint chars option:
-vimfx.get('hint_chars')
+// Get the value of the Hint characters option:
+vimfx.get('hints.chars')
 // Get all keyboard shortcuts (as a string) for the `f` command:
 vimfx.get('mode.normal.follow')
 ```
 
-#### `vimfx.getDefault(pref)`
+#### `vimfx.getDefault(option)`
 
-Gets the default value of the VimFx pref `pref`.
+Gets the default value of the VimFx option `option`.
 
 Useful when you wish to extend a default, rather than replacing it. See below.
 
-#### `vimfx.set(pref, value)`
+#### `vimfx.set(option, value)`
 
-Sets the value of the VimFx pref `pref` to `value`.
+Sets the value of the VimFx option `option` to `value`.
 
 ```js
-// Set the value of the Hint chars option:
-vimfx.set('hint_chars', 'abcdefghijklmnopqrstuvwxyz')
+// Set the value of the Hint characters option:
+vimfx.set('hints.chars', 'abcdefghijklmnopqrstuvwxyz')
 // Add yet a keyboard shortcut for the `f` command:
-vimfx.set('mode.normal.follow', vimfx.getDefault('mode.normal.follow') + '  e')
+vimfx.set('mode.normal.follow', vimfx.getDefault('mode.normal.follow') + '  ee')
 ```
 
-When extending a pref (as in the second example above), be sure to use
+When extending an option (as in the second example above), be sure to use
 `vimfx.getDefault` rather than `vimfx.get`. Otherwise you get a multiplying
-effect. In the above example, after starting Firefox a few times the pref would
-be `f  e  e  e  e`. Also, if you find that example very verbose: Remember that
-you’re using a programming language! Write a small helper function that suits
-your needs.
+effect. In the above example, after starting Firefox a few times the option
+would be `f  e  e  e  e`. Also, if you find that example very verbose: Remember
+that you’re using a programming language! Write a small helper function that
+suits your needs.
 
 Note: If you produce conflicting keyboard shortcuts, the order of your code does
-not matter. The command that comes first in VimFx’s settings page in the Add-ons
+not matter. The command that comes first in VimFx’s options page in the Add-ons
 Manager (and in the Keyboard Shortcuts help dialog) gets the shortcut; the other
 one(s) do(es) not. See the notes about order in [mode object], [category object]
 and [command object] for more information about order.
@@ -70,7 +70,7 @@ and [command object] for more information about order.
 ```js
 // Even though we set the shortcut for focusing the search bar last, the command
 // for focusing the location bar “wins”, because it comes first in VimFx’s
-// settings page in the Add-ons Manager.
+// options page in the Add-ons Manager.
 vimfx.set('mode.normal.focus_location_bar', 'ö')
 vimfx.set('mode.normal.focus_search_bar', 'ö')
 
@@ -88,10 +88,10 @@ Creates a new command.
 
 - name: `String`. The name used when accessing the command via
   `vimfx.modes[options.mode].commands[options.name]`. It is also used for the
-  pref used to store the shortcuts for the command:
+  option name (preference key) used to store the shortcuts for the command:
   `` `custom.mode.${options.mode}.${options.name}` ``.
 - description: `String`. Shown in the Keyboard Shortcuts help dialog and VimFx’s
-  settings page in the Add-ons Manager.
+  options page in the Add-ons Manager.
 - mode: `String`. Defaults to `'normal'`. The mode to add the command to. The
   value has to be one of the keys of [`vimfx.modes`].
 - category: `String`. Defaults to `'misc'` for Normal mode and `''`
@@ -106,14 +106,14 @@ Creates a new command.
 below for more information.
 
 <strong id="custom-command-shortcuts">Note</strong> that you have to give the
-new command a shortcut in VimFx’s settings page in the Add-ons Manager or set
+new command a shortcut in VimFx’s options page in the Add-ons Manager or set
 one using `vimfx.set(...)` to able to use the new command.
 
 ```js
 vimfx.addCommand({
   name: 'hello',
   description: 'Log Hello World',
-}, => {
+}, () => {
   console.log('Hello World!')
 })
 // Optional:
@@ -128,7 +128,8 @@ are added in order. The methods may be run multiple times.
 A rule is an `Array` of length 2:
 
 1. The first item is a function that returns `true` if the rule should be
-   applied and `false` if not. This is called the matching function.
+   applied and `false` if not. This is called the matching function. The
+   matching function receives a [location object] as its only argument.
 2. The second item is the value that should be used if the rule is applied. This
    is called the override.
 
@@ -137,13 +138,11 @@ found it is applied. No more rules will be applied.
 
 #### `vimfx.addOptionOverrides(...rules)`
 
-The rules are matched any time the value of a VimFx pref is needed.
+The rules are matched any time the value of a VimFx option is needed.
 
-The matching function receives a [location object].
-
-The override is an object whose keys are VimFx pref names and whose values
-override the pref in question. The values should be formatted as in an [options
-object].
+The override is an object whose keys are VimFx option names and whose values
+override the option in question. The values should be formatted as in an
+[options object].
 
 ```js
 vimfx.addOptionOverrides(
@@ -152,15 +151,23 @@ vimfx.addOptionOverrides(
     {prevent_autofocus: false}
   ]
 )
+
+vimfx.addOptionOverrides(
+  [ ({hostname}) => hostname === 'imgur.com',
+    {
+      pattern_attrs: ['class'],
+      pattern_selector: 'div.next-prev .btn',
+      prev_patterns: [/\bnavPrev\b/],
+      next_patterns: [/\bnavNext\b/],
+    }
+  ]
+)
 ```
 
 #### `vimfx.addKeyOverrides(...rules)`
 
 The rules are matched any time you press a key that is not part of the tail of a
-multi-key shortcut.
-
-The matching function receives a [location object] as well as the current
-mode name (one of the keys of [`vimfx.modes`]).
+multi-key Normal mode shortcut.
 
 The override is an array of keys which should not activate VimFx commands but be
 sent to the page.
@@ -179,10 +186,12 @@ vimfx.addKeyOverrides(
 ### `vimfx.send(vim, message, data = null, callback = null)`
 
 Send `message` (a string) to the instance of `frame.js` in the tab managed by
-[`vim`][vim object], and pass it `data`. If provided, `callback` must be a
-function that takes a single argument, which is the data that `frame.js`
-responds with. `frame.js` uses its [`vimfx.listen(...)`] method to listen for
-(and optionally respond to) `message`.
+[`vim`][vim object], and pass it `data`. `frame.js` uses its
+[`vimfx.listen(...)`] method to listen for (and optionally respond to)
+`message`.
+
+If provided, `callback` must be a function. That function will receive a single
+argument: The data that `frame.js` responds with.
 
 Here is an example:
 
@@ -198,6 +207,7 @@ vimfx.send(vim, 'getSelection', {example: 5}, selection => {
 // frame.js
 vimfx.listen('getSelection', ({example}, callback) => {
   console.log('`example` should be 5:', example)
+  // `content` is basically the same as the `window` of the page.
   let selection = content.getSelection().toString()
   callback(selection)
 })
@@ -205,7 +215,7 @@ vimfx.listen('getSelection', ({example}, callback) => {
 
 What if you want to do it the other way around: Send a message _from_ `frame.js`
 and listen for it in `config.js`? That’s not the common use case, so VimFx does
-not provide convenience functions for it. Yes, `vimfx.send(...)`, and
+not provide convenience functions for it. `vimfx.send(...)`, and
 `vimfx.listen(...)` in `frame.js`, are just light wrappers around the standard
 Firefox [Message Manager] to make it easier to create custom commands that ask
 `frame.js` for information about the current web page (as in the above example).
@@ -246,7 +256,7 @@ can be used to replace the blacklist option).
 ```js
 vimfx.on('locationChange', ({vim, location}) => {
   if (location.hostname === 'example.com') {
-    vim.enterMode('ignore', {type: 'blacklist'})
+    vimfx.modes.normal.commands.enter_mode_ignore.run({vim, blacklist: true})
   }
 })
 ```
@@ -309,7 +319,7 @@ The event is useful for knowing when to update UI showing the current mode.
 #### The `focusTypeChange` event
 
 Occurs when focusing or blurring any element. See also the [`blur_timeout`]
-pref.
+option.
 
 `data`:
 
@@ -327,7 +337,7 @@ Occurs when:
 
 - VimFx shuts down: When Firefox shuts down, when VimFx is disabled or when
   VimFx is updated.
-- When the config file is reloaded using the `zr` command.
+- When the config file is reloaded using the `gC` command.
 
 `data`: No data at all is passed.
 
@@ -346,7 +356,7 @@ The following methods don’t need any undoing:
 
 The following methods are automatically undone when the `shutdown` event fires.
 This means that if you, for example, add a custom command in `config.js` but
-then remove it from `config.js` and hit `zr`, the custom command will be gone in
+then remove it from `config.js` and hit `gC`, the custom command will be gone in
 VimFx.
 
 - `vimfx.set(...)`
@@ -430,10 +440,15 @@ This is a very low-level part of the API. It allows to:
     onEnter(args) {},
     onLeave(args) {},
     onInput(args, match) {
-      if (match.type === 'full') {
-        match.command.run(args)
+      switch (match.type) {
+        case 'full':
+          match.command.run(args)
+          return true
+        case 'partial':
+        case 'count':
+          return true
       }
-      return (match.type !== 'none')
+      return false
     },
   }
   ```
@@ -458,12 +473,106 @@ categories.custom = {
   [categories.tabs.order, commands.focus_location_bar.order]
 ```
 
+### Custom hint commands
+
+Apart from the standard hint commands, you can create your own.
+
+You may run any VimFx command by using the following pattern:
+
+```js
+// config.js
+vimfx.addCommand({
+  name: 'run_other_command_example',
+  description: 'Run other command example',
+}, (args) => {
+  // Replace 'follow' with any command name here:
+  vimfx.modes.normal.commands.follow.run(args)
+})
+```
+
+All hint commands (except `eb`) also support `args.callbackOverride`:
+
+```js
+// config.js
+vimfx.addCommand({
+  name: 'custom_hint_command_example',
+  description: 'Custom hint command example',
+}, (args) => {
+  vimfx.modes.normal.commands.follow.run(Object.assign({}, args, {
+    callbackOverride({type, href, id, timesLeft}) {
+      console.log('Marker data:', {type, href, id, timesLeft})
+      return (timesLeft > 1)
+    },
+  }))
+})
+```
+
+This lets you piggy-back on one of the existing hint commands by getting the
+same hints on screen as that command, but then doing something different with
+the matched hint marker.
+
+`callbackOverride` is called with an object with the following properties:
+
+- type: `String`. The type of the element of the matched hint marker. See
+  [`vimfx.setHintMatcher(...)`] for all possible values.
+
+- href: `String` or `null`. If `type` is `'link'`, then this is the `href`
+  attribute of the element of the matched hint marker.
+
+- id: An id that you can pass to [`vimfx.getMarkerElement(...)`] to get the
+  element of the matched hint marker.
+
+- timesLeft: `Number`. Calling a hint command with a count means that you want
+  to run it _count_ times in a row. This number tells how many times there are
+  left to run. If you don’t provide a count, the number is `1`.
+
+`callbackOverride` should return `true` if you want the hint markers to
+re-appear on screen after you’ve matched one of them (as in the `af` command),
+and `false` if you wish to exit Hints mode. If your command ignores counts,
+simply always return `false`. Otherwise you most likely want to return
+`timesLeft > 1`.
+
+Here’s an example which adds a silly command for marking links with
+color—`http://` links with red and all other links with green.
+
+```js
+// config.js
+let {commands} = vimfx.modes.normal
+
+vimfx.addCommand({
+  name: 'mark_link',
+  category: 'browsing',
+  description: 'Mark link with red or green',
+}, (args) => {
+  let {vim} = args
+  commands.follow_in_tab.run(Object.assign({}, args, {
+    callbackOverride({type, href, id, timesLeft}) {
+      if (href) {
+        let color = href.startsWith('http://') ? 'red' : 'green'
+        vimfx.send(vim, 'highlight_marker_element', {id, color})
+      }
+      return false
+    },
+  }))
+})
+```
+
+```js
+// frame.js
+vimfx.listen('highlight_marker_element', ({id, color}) => {
+  let element = vimfx.getMarkerElement(id)
+  if (element) {
+    element.style.backgroundColor = color
+  }
+})
+```
+
 ### Mode object
 
 A mode is an object with the following properties:
 
 - name: `String`. A human readable name of the mode used in the Keyboard
-  Shortcuts help dialog and VimFx’s settings page in the Add-ons Manager. Config
+  Shortcuts help dialog and VimFx’s options page in the Add-ons Manager. Config
   file users adding custom modes could simply use a hard-coded string; extension
   authors are encouraged to look up the name from a locale file.
 - order: `Number`. The first of the default modes has the order `100` and then
@@ -488,18 +597,14 @@ properties:
 ##### onEnter
 
 This method is called with an object as mentioned above, and after that there
-may be any number of arguments (`args` in `vim.enterMode(modeName, ...args)`)
-that the mode is free to do whatever it wants with.
-
-Whatever is returned from `onEnter` will be returned from
-`vim.enterMode(modeName, ...args)`.
+may be any number of arguments that the mode is free to do whatever it wants
+with.
 
 ##### onInput
 
 The object passed to this method (see above) also has the following properties:
 
-- uiEvent: `Event` or `false`. The keydown event object if the event occurred in
-  the browser UI, `false` otherwise (if the event occurred in web page content).
+- event: `Event`. The keydown event object.
 - count: `Number`. The count for the command. `undefined` if no count. (This is
   simply a copy of `match.count`. `match` is defined below.)
 
@@ -517,7 +622,7 @@ to the browser and web pages, and `false` otherwise.
 A category is an object with the following properties:
 
 - name: `String`. A human readable name of the category used in the Keyboard
-  Shortcuts help dialog and VimFx’s settings page in the Add-ons Manager. Config
+  Shortcuts help dialog and VimFx’s options page in the Add-ons Manager. Config
   file users adding custom categories could simply a use hard-coded string;
   extension authors are encouraged to look up the name from a locale file.
 - order: `Number`. The first of the default categories is the “uncategorized”
@@ -528,10 +633,11 @@ A category is an object with the following properties:
 
 A command is an object with the following properties:
 
-- pref: `String`. The pref used to store the shortcuts for the command.
+- pref: `String`. The option name (preference key) used to store the shortcuts
+  for the command.
 - run(args): `Function`. Called when the command is activated.
 - description: `String`. A description of the command, shown in the Keyboard
-  Shortcuts help dialog and VimFx’s settings page in the Add-ons Manager. Config
+  Shortcuts help dialog and VimFx’s options page in the Add-ons Manager. Config
   file users adding custom commands could simply use a hard-coded string;
   extension authors are encouraged to look up the name from a locale file.
 - category: `String`. The category to add the command to. The value has to be
@@ -602,6 +708,10 @@ A `match` object has the following properties:
 
 - unmodifiedKey: `String`. `keyStr` without modifiers.
 
+- rawKey: `String`. Unchanged [`event.key`].
+
+- rawCode: `String`. Unchanged [`event.code`].
+
 - toplevel: `Boolean`. Whether or not the match was a toplevel match in the
   shortcut key tree. This is `true` unless the match is part of the tail of a
   multi-key shortcut.
@@ -646,12 +756,6 @@ A `vim` object has the following properties:
 
   `match.likelyConflict` of [match object]s depend on `focusType`.
 
-- enterMode(modeName, ...args): `Function`. Enter mode `modeName`, passing
-  `...args` to the mode. It is up to every mode to do whatever it wants to with
-  `...args`. If `modeName` was already the current mode, nothing is done and
-  `undefined` is returned. Otherwise it us up to the mode to return whatever it
-  wants to.
-
 - isUIEvent(event): `Function`. Returns `true` if `event` occurred in the
   browser UI, and `false` otherwise (if it occurred in web page content).
 
@@ -672,15 +776,16 @@ source code. They may change at any time.
 ### Options object
 
 An `options` object provides access to all of VimFx’s options. It is an object
-whose keys are VimFx pref names.
+whose keys are VimFx option names.
 
-Note that the values are not just simply `vimfx.get(pref)` for the `pref` in
-question; they are _parsed_ (`parse(vimfx.get(pref))`):
+Note that the values are not just simply `vimfx.get(option)` for the `option` in
+question; they are _parsed_ (`parse(vimfx.get(option))`):
 
-- Space-separated prefs are parsed into arrays of strings.
+- Space-separated options are parsed into arrays of strings. For example,
+  `pattern_attrs: ['class']`.
 
-- `blacklist` and `{prev,next}_patterns` are parsed into arrays of regular
-  expressions.
+- `blacklist`, `prev_patterns` and `next_patterns` are parsed into arrays of
+  regular expressions. For example, `prev_patterns: [/\bnavPrev\b/]`.
 
 (See [parse-prefs.coffee] for all details.)
 
@@ -716,7 +821,7 @@ examples.
 ### `vimfx.setHintMatcher(hintMatcher)`
 
 `hintMatcher` is a function that lets you customize which elements do and don’t
-get hints. It might help to read about [the `f` commands] first.
+get hints. It might help to read about [the hint commands] first.
 
 If you call `vimfx.setHintMatcher(hintMatcher)` more than once, only the
 `hintMatcher` provided the last time will be used.
@@ -733,10 +838,11 @@ The arguments passed to the `hintMatcher` function are:
 - id: `String`. A string identifying which command is used:
 
   - `'normal'`: `f` or `af`.
-  - `'tab'`: `F`, `gf` or `gF`.
+  - `'tab'`: `F`, `et`, `ew` or `ep`.
   - `'copy'`: `yf`.
-  - `'focus'`: `zf`.
-  - `'select'`: `v`, `zv` or `yv`.
+  - `'focus'`: `ef`.
+  - `'context'`: `ec`.
+  - `'select'`: `v`, `av` or `yv`.
 
 - element: `Element`. One out of all elements currently inside the viewport.
 
@@ -775,27 +881,28 @@ The available type strings depend on `id`:
   - focusable: Any focusable element not falling into another category.
   - scrollable: Like “scrollable” when `id` is “normal” (see above).
 
+- context:
+
+  - context: An element that can have a context menu opened.
+
 - select:
 
   - selectable: An element with selectable text (but not text inputs).
 
 The function must return `null` or a string like the `type` parameter.
 
+### `vimfx.getMarkerElement(id)`
 
-## Stability
+Takes an id that has been given to you when creating [custom hint commands] and
+returns the DOM element associated with that id. If no element can be found,
+`null` is returned.
 
-The API is currently **experimental** and therefore **unstable.** Things might
-break with new VimFx versions. However, no breaking changes are planned, and
-will be avoided if feasible.
-
-As soon as VimFx 1.0.0 (which does not seem to be too far away) is released
-backwards compatibility will be a priority and won’t be broken until VimFx
-2.0.0.
 
 [option overrides]: #vimfxaddoptionoverridesrules
 [`vimfx.send(...)`]: #vimfxsendvim-message-data--null-callback--null
 [`vimfx.listen(...)`]: #vimfxlistenmessage-listener
 [categories]: #vimfxgetcategories
+[custom hint commands]: #custom-hints-commands
 [`vimfx.modes`]: #vimfxmodes
 [onInput]: #oninput
 [mode object]: #mode-object
@@ -807,6 +914,8 @@ backwards compatibility will be a priority and won’t be broken until VimFx
 [location object]: #location-object
 [The `focusTypeChange` event]: #the-focustypechange-event
 [the `shutdown` event]: #the-shutdown-event
+[`vimfx.setHintMatcher(...)`]: #vimfxsethintmatcherhintmatcher
+[`vimfx.getMarkerElement(...)`]: #vimfxgetmarkerelementid
 
 [blacklisted]: options.md#blacklist
 [special options]: options.md#special-options
@@ -819,7 +928,7 @@ backwards compatibility will be a priority and won’t be broken until VimFx
 [`notifications_enabled`]: options.md#notifications_enabled
 
 [button]: button.md
-[the `f` commands]: commands.md#the-f-commands--hints-mode
+[the hint commands]: commands.md#the-hint-commands--hints-mode
 [special keys]: shortcuts.md#special-keys
 [styling]: styling.md
 
@@ -829,6 +938,8 @@ backwards compatibility will be a priority and won’t be broken until VimFx
 [commands.coffee]: ../extension/lib/commands.coffee
 [vim.coffee]: ../extension/lib/vim.coffee
 
+[`event.key`]: https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key
+[`event.code`]: https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code
 [`Window`]: https://developer.mozilla.org/en-US/docs/Web/API/Window
 [`Browser`]: https://developer.mozilla.org/en-US/docs/Mozilla/Tech/XUL/browser
 [`window.location`]: https://developer.mozilla.org/en-US/docs/Web/API/Location

@@ -50,12 +50,20 @@ XULTextBoxElement = Ci.nsIDOMXULTextBoxElement
 # 'command' is fired automatically after 'click' on xul pages.
 EVENTS_CLICK       = ['mousedown', 'mouseup']
 EVENTS_CLICK_XUL   = ['click']
+EVENTS_CONTEXT     = ['contextmenu']
 EVENTS_HOVER_START = ['mouseover', 'mouseenter', 'mousemove']
 EVENTS_HOVER_END   = ['mouseout',  'mouseleave']
 
 
 
 # Element classification helpers
+
+hasMarkableTextNode = (element) ->
+  return Array.some(element.childNodes, (node) ->
+    # Ignore whitespace-only text nodes, and single-letter ones (which are
+    # common in many syntax highlighters).
+    return node.nodeType == 3 and node.data.trim().length > 1
+  )
 
 isActivatable = (element) ->
   return element.localName in ['a', 'button'] or
@@ -100,7 +108,12 @@ isDevtoolsWindow = (window) ->
   ]
 
 isFocusable = (element) ->
-  return element.tabIndex > -1 and
+  # Focusable elements have `.tabIndex > 1` (but not necessarily a
+  # `tabindex="…"` attribute) …
+  return (element.tabIndex > -1 or
+          # … or an explicit `tabindex="-1"` attribute (which means that it is
+          # focusable, but not reachable with `<tab>`).
+          element.getAttribute?('tabindex') == '-1') and
          not (element.localName?.endsWith?('box') and
               element.localName != 'checkbox') and
          not (element.localName == 'toolbarbutton' and
@@ -169,6 +182,39 @@ isTypingElement = (element) ->
 
 # Active/focused element helpers
 
+blurActiveBrowserElement = (vim) ->
+  # - Blurring in the next tick allows to pass `<escape>` to the location bar to
+  #   reset it, for example.
+  # - Focusing the current browser afterwards allows to pass `<escape>` as well
+  #   as unbound keys to the page. However, focusing the browser also triggers
+  #   focus events on `document` and `window` in the current page. Many pages
+  #   re-focus some text input on those events, making it impossible to blur
+  #   those! Therefore we tell the frame script to suppress those events.
+  {window} = vim
+  activeElement = getActiveElement(window)
+  activeElement.closest('tabmodalprompt')?.abortPrompt()
+  vim._send('browserRefocus')
+  nextTick(window, ->
+    activeElement.blur()
+    window.gBrowser.selectedBrowser.focus()
+  )
+
+blurActiveElement = (window) ->
+  # Blurring a frame element also blurs any active elements inside it. Recursing
+  # into the frames and blurring the “real” active element directly would give
+  # focus to the `<body>` of its containing frame, while blurring the top-most
+  # frame gives focus to the top-most `<body>`. This allows to blur fancy text
+  # editors which use an `<iframe>` as their text area.
+  window.document.activeElement?.blur()
+
+# Focus an element and tell Firefox that the focus happened because of a user
+# action (not just because some random programmatic focus). `.FLAG_BYKEY` might
+# look more appropriate, but it unconditionally selects all text, which
+# `.FLAG_BYMOUSE` does not.
+focusElement = (element, options = {}) ->
+  nsIFocusManager.setFocus(element, options.flag ? 'FLAG_BYMOUSE')
+  element.select?() if options.select
+
 # NOTE: In frame scripts, `document.activeElement` may be `null` when the page
 # is loading. Therefore always check if anything was returned, such as:
 #
@@ -192,38 +238,6 @@ getActiveElement = (window) ->
     return activeElement
   else
     return getActiveElement(activeElement.contentWindow)
-
-blurActiveElement = (window) ->
-  # Blurring a frame element also blurs any active elements inside it. Recursing
-  # into the frames and blurring the “real” active element directly would give
-  # focus to the `<body>` of its containing frame, while blurring the top-most
-  # frame gives focus to the top-most `<body>`. This allows to blur fancy text
-  # editors which use an `<iframe>` as their text area.
-  window.document.activeElement?.blur()
-
-blurActiveBrowserElement = (vim) ->
-  # - Blurring in the next tick allows to pass `<escape>` to the location bar to
-  #   reset it, for example.
-  # - Focusing the current browser afterwards allows to pass `<escape>` as well
-  #   as unbound keys to the page. However, focusing the browser also triggers
-  #   focus events on `document` and `window` in the current page. Many pages
-  #   re-focus some text input on those events, making it impossible to blur
-  #   those! Therefore we tell the frame script to suppress those events.
-  {window} = vim
-  activeElement = getActiveElement(window)
-  vim._send('browserRefocus')
-  nextTick(window, ->
-    activeElement.blur()
-    window.gBrowser.selectedBrowser.focus()
-  )
-
-# Focus an element and tell Firefox that the focus happened because of a user
-# action (not just because some random programmatic focus). `.FLAG_BYKEY` might
-# look more appropriate, but it unconditionally selects all text, which
-# `.FLAG_BYMOUSE` does not.
-focusElement = (element, options = {}) ->
-  nsIFocusManager.setFocus(element, options.flag ? 'FLAG_BYMOUSE')
-  element.select?() if options.select
 
 getFocusType = (element) -> switch
   when isIgnoreModeFocusType(element)
@@ -277,19 +291,18 @@ onRemoved = (element, fn) ->
 
   return disconnect
 
-suppressEvent = (event) ->
-  event.preventDefault()
-  event.stopPropagation()
-
-simulateMouseEvents = (element, sequence) ->
+simulateMouseEvents = (element, sequence, browserOffset) ->
   window = element.ownerGlobal
   rect = element.getBoundingClientRect()
+  topOffset = getTopOffset(element)
 
   eventSequence = switch sequence
     when 'click'
       EVENTS_CLICK
     when 'click-xul'
       EVENTS_CLICK_XUL
+    when 'context'
+      EVENTS_CONTEXT
     when 'hover-start'
       EVENTS_HOVER_START
     when 'hover-end'
@@ -298,7 +311,14 @@ simulateMouseEvents = (element, sequence) ->
       sequence
 
   for type in eventSequence
-    buttonNum = if type in EVENTS_CLICK then 1 else 0
+    buttonNum = switch
+      when type in EVENTS_CONTEXT
+        2
+      when type in EVENTS_CLICK
+        1
+      else
+        0
+
     mouseEvent = new window.MouseEvent(type, {
       # Let the event bubble in order to trigger delegated event listeners.
       bubbles: type not in ['mouseenter', 'mouseleave']
@@ -314,13 +334,11 @@ simulateMouseEvents = (element, sequence) ->
       # `client{X,Y}`. `{offset,layer,movement}{X,Y}` are not worth the trouble
       # to set.
       clientX: rect.left
-      clientY: rect.top
-      # To exactly calculate `screen{X,Y}` one has to to check where the web
-      # page content area is inside the browser chrome and go through all parent
-      # frames as well. This is good enough. YAGNI for now.
-      screenX: window.screenX + rect.left
-      screenY: window.screenY + rect.top
+      clientY: rect.top + rect.height / 2
+      screenX: browserOffset.x + topOffset.x
+      screenY: browserOffset.y + topOffset.y + rect.height / 2
     })
+
     if type == 'mousemove'
       # If the below technique is used for this event, the “URL popup” (shown
       # when hovering or focusing links) does not appear.
@@ -336,6 +354,10 @@ simulateMouseEvents = (element, sequence) ->
 
   return
 
+suppressEvent = (event) ->
+  event.preventDefault()
+  event.stopPropagation()
+
 
 
 # DOM helpers
@@ -350,14 +372,14 @@ checkElementOrAncestor = (element, fn) ->
     element = element.parentElement
   return false
 
-clearSelectionDeep = (window) ->
+clearSelectionDeep = (window, {blur = true} = {}) ->
   # The selection might be `null` in hidden frames.
   selection = window.getSelection()
   selection?.removeAllRanges()
   for frame in window.frames
-    clearSelectionDeep(frame)
+    clearSelectionDeep(frame, {blur})
     # Allow parents to re-gain control of text selection.
-    frame.frameElement.blur()
+    frame.frameElement.blur() if blur
   return
 
 containsDeep = (parent, element) ->
@@ -387,6 +409,32 @@ getRootElement = (document) ->
   else
     return document.documentElement
 
+getText = (element) ->
+  text = element.textContent or element.value or element.placeholder or ''
+  return text.trim().replace(/\s+/, ' ')
+
+getTopOffset = (element) ->
+  window = element.ownerGlobal
+
+  {left: x, top: y} = element.getBoundingClientRect()
+  while window.frameElement
+    frame = window.frameElement
+    frameRect = frame.getBoundingClientRect()
+    x += frameRect.left
+    y += frameRect.top
+
+    computedStyle = frame.ownerGlobal.getComputedStyle(frame)
+    if computedStyle
+      x +=
+        parseFloat(computedStyle.getPropertyValue('border-left-width')) +
+        parseFloat(computedStyle.getPropertyValue('padding-left'))
+      y +=
+        parseFloat(computedStyle.getPropertyValue('border-top-width')) +
+        parseFloat(computedStyle.getPropertyValue('padding-top'))
+
+    window = window.parent
+  return {x, y}
+
 injectTemporaryPopup = (document, contents) ->
   popup = document.createElement('menupopup')
   popup.appendChild(contents)
@@ -406,15 +454,61 @@ isDetached = (element) ->
 isNonEmptyTextNode = (node) ->
   return node.nodeType == 3 and node.data.trim() != ''
 
-isPositionFixed = (element) ->
-  computedStyle = element.ownerGlobal.getComputedStyle(element)
-  return computedStyle?.getPropertyValue('position') == 'fixed'
-
 querySelectorAllDeep = (window, selector) ->
   elements = Array.from(window.document.querySelectorAll(selector))
   for frame in window.frames
     elements.push(querySelectorAllDeep(frame, selector)...)
   return elements
+
+selectAllSubstringMatches = (element, substring, {caseSensitive = true} = {}) ->
+  window = element.ownerGlobal
+  selection = window.getSelection()
+  {textContent} = element
+
+  format = (string) -> if caseSensitive then string else string.toLowerCase()
+  offsets =
+    getAllNonOverlappingRangeOffsets(format(textContent), format(substring))
+  offsetsLength = offsets.length
+  return if offsetsLength == 0
+
+  textIndex = 0
+  offsetsIndex = 0
+  [currentOffset] = offsets
+  searchIndex = currentOffset.start
+  start = null
+
+  walkTextNodes(element, (textNode) ->
+    {length} = textNode.data
+    return false if length == 0
+
+    while textIndex + length > searchIndex
+      if start
+        range = window.document.createRange()
+        range.setStart(start.textNode, start.offset)
+        range.setEnd(textNode, currentOffset.end - textIndex)
+        selection.addRange(range)
+
+        offsetsIndex += 1
+        return true if offsetsIndex >= offsetsLength
+        currentOffset = offsets[offsetsIndex]
+
+        start = null
+        searchIndex = currentOffset.start
+
+      else
+        start = {textNode, offset: currentOffset.start - textIndex}
+        searchIndex = currentOffset.end - 1
+
+    textIndex += length
+    return false
+  )
+
+selectElement = (element) ->
+  window = element.ownerGlobal
+  selection = window.getSelection()
+  range = window.document.createRange()
+  range.selectNodeContents(element)
+  selection.addRange(range)
 
 setAttributes = (element, attributes) ->
   for attribute, value of attributes
@@ -427,6 +521,16 @@ setHover = (element, hover) ->
     nsIDomUtils[method](element, ':hover')
     element = element.parentElement
   return
+
+walkTextNodes = (element, fn) ->
+  for node in element.childNodes then switch node.nodeType
+    when 3 # TextNode.
+      stop = fn(node)
+      return true if stop
+    when 1 # Element.
+      stop = walkTextNodes(node, fn)
+      return true if stop
+  return false
 
 
 
@@ -487,6 +591,25 @@ bisect = (min, max, fn) ->
     else
       [null, null]
 
+getAllNonOverlappingRangeOffsets = (string, substring) ->
+  {length} = substring
+  return [] if length == 0
+
+  offsets = []
+  lastOffset = {start: -Infinity, end: -Infinity}
+  index = -1
+
+  loop
+    index = string.indexOf(substring, index + 1)
+    break if index == -1
+    if index > lastOffset.end
+      lastOffset = {start: index, end: index + length}
+      offsets.push(lastOffset)
+    else
+      lastOffset.end = index + length
+
+  return offsets
+
 has = (obj, prop) -> Object::hasOwnProperty.call(obj, prop)
 
 # Check if `search` exists in `string` (case insensitively). Returns `false` if
@@ -494,16 +617,6 @@ has = (obj, prop) -> Object::hasOwnProperty.call(obj, prop)
 includes = (string, search) ->
   return false unless typeof string == 'string'
   return string.toLowerCase().includes(search)
-
-nextTick = (window, fn) -> window.setTimeout((-> fn()) , 0)
-
-regexEscape = (s) -> s.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&')
-
-removeDuplicates = (array) -> Array.from(new Set(array))
-
-# Remove duplicate characters from string (case insensitive).
-removeDuplicateCharacters = (str) ->
-  return removeDuplicates( str.toLowerCase().split('') ).join('')
 
 # Calls `fn` repeatedly, with at least `interval` ms between each call.
 interval = (window, interval, fn) ->
@@ -518,6 +631,33 @@ interval = (window, interval, fn) ->
   next()
   return clearInterval
 
+nextTick = (window, fn) -> window.setTimeout((-> fn()) , 0)
+
+overlaps = (rectA, rectB) ->
+  return \
+    Math.round(rectA.right) >= Math.round(rectB.left) and
+    Math.round(rectA.left) <= Math.round(rectB.right) and
+    Math.round(rectA.bottom) >= Math.round(rectB.top) and
+    Math.round(rectA.top) <= Math.round(rectB.bottom)
+
+partition = (array, fn) ->
+  matching = []
+  nonMatching = []
+  for item, index in array
+    if fn(item, index, array)
+      matching.push(item)
+    else
+      nonMatching.push(item)
+  return [matching, nonMatching]
+
+regexEscape = (s) -> s.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&')
+
+removeDuplicateChars = (string) -> removeDuplicates(string.split('')).join('')
+
+removeDuplicates = (array) -> Array.from(new Set(array))
+
+sum = (numbers) -> numbers.reduce(((sum, number) -> sum + number), 0)
+
 
 
 # Misc helpers
@@ -528,18 +668,11 @@ expandPath = (path) ->
   else
     return path
 
-formatError = (error) ->
-  stack = String(error.stack?.formattedStack ? error.stack ? '')
-    .split('\n')
-    .filter((line) -> line.includes('.xpi!'))
-    .map((line) -> '  ' + line.replace(/(?:\/<)*@.+\.xpi!/g, '@'))
-    .join('\n')
-  return "#{error}\n#{stack}"
-
 getCurrentLocation = ->
-  window = getCurrentWindow()
+  return unless window = getCurrentWindow()
   return new window.URL(window.gBrowser.selectedBrowser.currentURI.spec)
 
+# This function might return `null` on startup.
 getCurrentWindow = -> nsIWindowMediator.getMostRecentWindow('navigator:browser')
 
 hasEventListeners = (element, type) ->
@@ -586,6 +719,7 @@ writeToClipboard = (text) -> nsIClipboardHelper.copyString(text)
 
 
 module.exports = {
+  hasMarkableTextNode
   isActivatable
   isAdjustable
   isContentEditable
@@ -598,17 +732,17 @@ module.exports = {
   isTextInputElement
   isTypingElement
 
-  getActiveElement
-  blurActiveElement
   blurActiveBrowserElement
+  blurActiveElement
   focusElement
+  getActiveElement
   getFocusType
 
   listen
   listenOnce
   onRemoved
-  suppressEvent
   simulateMouseEvents
+  suppressEvent
 
   area
   checkElementOrAncestor
@@ -616,28 +750,35 @@ module.exports = {
   containsDeep
   createBox
   getRootElement
+  getText
+  getTopOffset
   injectTemporaryPopup
   insertText
   isDetached
   isNonEmptyTextNode
-  isPositionFixed
   querySelectorAllDeep
+  selectAllSubstringMatches
+  selectElement
   setAttributes
   setHover
+  walkTextNodes
 
   Counter
   EventEmitter
   bisect
+  getAllNonOverlappingRangeOffsets
   has
   includes
-  nextTick
-  regexEscape
-  removeDuplicates
-  removeDuplicateCharacters
   interval
+  nextTick
+  overlaps
+  partition
+  regexEscape
+  removeDuplicateChars
+  removeDuplicates
+  sum
 
   expandPath
-  formatError
   getCurrentLocation
   getCurrentWindow
   hasEventListeners

@@ -28,8 +28,8 @@ class ScrollableElements
     @elements = new Set()
     @largest = null
 
-  MINIMUM_SCROLL: 5
-  MINIMUM_SCROLLABLE_ELEMENT_AREA: 25
+  MIN_SCROLL: 5
+  MIN_SCROLLABLE_ELEMENT_AREA: 25
 
   # Even in quirks mode the 'overflow' event is triggered for `<html>`, _not_
   # `<body>`. This method takes care of returning the appropriate element, so
@@ -61,8 +61,8 @@ class ScrollableElements
 
   isScrollable: (element) ->
     element = @quirks(element)
-    return element.scrollTopMax  >= @MINIMUM_SCROLL or
-           element.scrollLeftMax >= @MINIMUM_SCROLL
+    return element.scrollTopMax  >= @MIN_SCROLL or
+           element.scrollLeftMax >= @MIN_SCROLL
 
   addChecked: (element) ->
     return unless computedStyle = @window.getComputedStyle(element)
@@ -71,7 +71,7 @@ class ScrollableElements
            # There’s no need to track elements so small that they don’t even fit
            # the scrollbars. For example, Gmail has lots of tiny overflowing
            # iframes. Filter those out.
-           utils.area(element) < @MINIMUM_SCROLLABLE_ELEMENT_AREA or
+           utils.area(element) < @MIN_SCROLLABLE_ELEMENT_AREA or
            # On some pages, such as Google Groups, 'overflow' events may occur
            # for elements that aren’t even scrollable.
            not @isScrollable(element)
@@ -129,5 +129,12 @@ class ScrollableElements
     else
       @reject((element) => not @isScrollable(element))
       return @largest ? @quirks(@window.document.documentElement)
+
+  getPageScrollPosition: ->
+    element = @filterSuitableDefault()
+    if element.ownerDocument.documentElement.localName == 'svg'
+      return [element.ownerGlobal.scrollX, element.ownerGlobal.scrollY]
+    else
+      return [element.scrollLeft, element.scrollTop]
 
 module.exports = ScrollableElements

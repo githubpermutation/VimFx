@@ -32,7 +32,7 @@ These are the modes of VimFx:
   make sense to [enter Ignore mode by default][blacklist] and stay in Ignore
   mode most of the time, occasionally popping into Normal mode.
 
-- Hints mode. Entered when using the [`f` commands][f-commands] and lets you
+- Hints mode. Entered when using the [hint commands][hint-commands] and lets you
   click things by typing the letters of hint markers.
 
 - Caret mode. Entered when using some of the [`v` commands][v-commands] and lets
@@ -49,12 +49,11 @@ A mode does three things.
   while the point of Ignore mode is to have as few as possible. This is the most
   important point of modes.
 
-- It decides what happens when you press keys on your keyboard. If your key
-  press is part of the [shortcut] for a command, it is usually consumed by
-  VimFx. If not, Normal mode and Ignore mode pass the key press on (letting it
-  behave as if VimFx wasn’t even installed), while in [Hints mode][f-commands]
-  _all_ key presses are captured, allowing you to type the letters of a hint
-  marker.
+- It decides what happens when you press keys on your keyboard. If your keypress
+  is part of the [shortcut] for a command, it is usually consumed by VimFx. If
+  not, Normal mode and Ignore mode pass the keypress on (letting it behave as if
+  VimFx wasn’t even installed), while in [Hints mode][hint-commands] _all_
+  keypresses are captured, allowing you to type the letters of a hint marker.
 
 - It tells all parts of VimFx what mode you’re in. (How surprising!) Some
   features are only enabled in certain modes. For example, [autofocus
@@ -70,6 +69,6 @@ Note that the mode is per tab, not global.
 [blacklist]: options.md#blacklist
 [autofocus prevention]: options.md#prevent-autofocus
 [shortcut]: shortcuts.md
-[f-commands]: commands.md#the-f-commands--hints-mode
+[hint-commands]: commands.md#the-hint-commands--hints-mode
 [v-commands]: commands.md#the-v-commands--caret-mode
 [button]: button.md

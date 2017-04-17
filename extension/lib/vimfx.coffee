@@ -19,7 +19,7 @@
 
 # This file defines a top-level object to hold global state for VimFx. It keeps
 # track of all `Vim` instances (vim.coffee), all options and all keyboard
-# shortcuts. It can consume key presses according to its commands, and return
+# shortcuts. It can consume keypresses according to its commands, and return
 # the commands for UI presentation. There is only one `VimFx` instance.
 
 notation = require('vim-like-key-notation')
@@ -27,6 +27,7 @@ prefs = require('./prefs')
 utils = require('./utils')
 Vim = require('./vim')
 
+CARET_BROWSING_PREF = 'accessibility.browsewithcaret'
 DIGIT = /^\d$/
 
 class VimFx extends utils.EventEmitter
@@ -35,14 +36,25 @@ class VimFx extends utils.EventEmitter
     @vims = new WeakMap()
     @lastClosedVim = null
     @goToCommand = null
+    @skipObserveCaretBrowsing = false
+    @ignoreKeyEventsUntilTime = 0
     @skipCreateKeyTrees = false
     @createKeyTrees()
     @reset()
+    @observeCaretBrowsing()
     @on('modeChange', ({vim}) => @reset(vim.mode))
 
   SPECIAL_KEYS: {
     '<force>': {}
     '<late>': {single: true}
+  }
+
+  MODIFIER_KEYS: {
+    '<alt>': true
+    '<control>': true
+    '<ctrl>': true
+    '<meta>': true
+    '<shift>': true
   }
 
   addVim: (browser) ->
@@ -69,9 +81,21 @@ class VimFx extends utils.EventEmitter
     @lastInputTime = 0
     @count = ''
 
+  resetCaretBrowsing: (value = @options.browsewithcaret) ->
+    @skipObserveCaretBrowsing = true
+    prefs.root.set(CARET_BROWSING_PREF, value)
+    @skipObserveCaretBrowsing = false
+
+  observeCaretBrowsing: ->
+    prefs.root.observe(CARET_BROWSING_PREF, =>
+      return if @skipObserveCaretBrowsing
+      prefs.set('browsewithcaret', prefs.root.get(CARET_BROWSING_PREF))
+    )
+
   createKeyTrees: ->
     return if @skipCreateKeyTrees
-    {@keyTrees, @errors} = createKeyTrees(@getGroupedCommands(), @SPECIAL_KEYS)
+    {@keyTrees, @errors} =
+      createKeyTrees(@getGroupedCommands(), @SPECIAL_KEYS, @MODIFIER_KEYS)
 
   stringifyKeyEvent: (event) ->
     return '' if event.key.endsWith('Lock')
@@ -86,6 +110,9 @@ class VimFx extends utils.EventEmitter
     return unless keyStr = @stringifyKeyEvent(event)
 
     now = Date.now()
+
+    return true if now <= @ignoreKeyEventsUntilTime
+
     @reset(mode) if now - @lastInputTime >= @options.timeout
     @lastInputTime = now
 
@@ -134,8 +161,9 @@ class VimFx extends utils.EventEmitter
 
     @reset(mode) if type == 'full'
     return {
-      type, command, count, specialKeys, keyStr, unmodifiedKey, toplevel
-      likelyConflict
+      type, command, count, toplevel
+      specialKeys, keyStr, unmodifiedKey, likelyConflict
+      rawKey: event.key, rawCode: event.code
       discard: @reset.bind(this, mode)
     }
 
@@ -184,7 +212,7 @@ byOrder = (a, b) -> a.order - b.order
 class Leaf
   constructor: (@command, @originalSequence, @specialKeys) ->
 
-createKeyTrees = (groupedCommands, specialKeysSpec) ->
+createKeyTrees = (groupedCommands, specialKeysSpec, modifierKeys) ->
   keyTrees = {}
   errors = {}
 
@@ -200,13 +228,8 @@ createKeyTrees = (groupedCommands, specialKeysSpec) ->
     }
     pushError(error, command)
 
-  pushSpecialKeyError = (command, id, originalSequence, key) ->
-    error = {
-      id: "special_key.#{id}"
-      subject: key
-      context: originalSequence
-    }
-    pushError(error, command)
+  pushKeyError = (command, id, originalSequence, key) ->
+    pushError({id, subject: key, context: originalSequence}, command)
 
   for mode in groupedCommands
     keyTrees[mode._name] = {}
@@ -221,25 +244,32 @@ createKeyTrees = (groupedCommands, specialKeysSpec) ->
         command._sequences.push(shortcut.original)
         seenNonSpecialKey = false
         specialKeys = {}
-
         errored = false
+
         for prefixKey, index in prefixKeys
+          if prefixKey of modifierKeys
+            pushKeyError(
+              command, 'mistake_modifier', shortcut.original, prefixKey
+            )
+            errored = true
+            break
           if prefixKey of specialKeysSpec
             if seenNonSpecialKey
-              pushSpecialKeyError(
-                command, 'prefix_only', shortcut.original, prefixKey
+              pushKeyError(
+                command, 'special_key.prefix_only', shortcut.original, prefixKey
               )
               errored = true
               break
             else
               specialKeys[prefixKey] = true
               continue
-          else if not seenNonSpecialKey
+          unless seenNonSpecialKey
             for specialKey of specialKeys
               options = specialKeysSpec[specialKey]
               if options.single
-                pushSpecialKeyError(
-                  command, 'single_only', shortcut.original, specialKey
+                pushKeyError(
+                  command, 'special_key.single_only', shortcut.original,
+                  specialKey
                 )
                 errored = true
                 break
@@ -256,12 +286,17 @@ createKeyTrees = (groupedCommands, specialKeysSpec) ->
               tree = next
           else
             tree = tree[prefixKey] = {}
+
         continue if errored
 
+        if lastKey of modifierKeys
+          pushKeyError(command, 'lone_modifier', shortcut.original, lastKey)
+          errored = true
+          continue
         if lastKey of specialKeysSpec
           subject = if seenNonSpecialKey then lastKey else shortcut.original
-          pushSpecialKeyError(
-            command, 'prefix_only', shortcut.original, subject
+          pushKeyError(
+            command, 'special_key.prefix_only', shortcut.original, subject
           )
           continue
         if lastKey of tree

@@ -1,6 +1,6 @@
 ###
 # Copyright Anton Khodakivskiy 2012, 2013, 2014.
-# Copyright Simon Lydell 2013, 2014, 2015, 2016.
+# Copyright Simon Lydell 2013, 2014, 2015, 2016, 2017.
 # Copyright Wang Zhuochun 2013, 2014.
 #
 # This file is part of VimFx.
@@ -30,6 +30,7 @@ config = require('./config')
 help = require('./help')
 markableElements = require('./markable-elements')
 MarkerContainer = require('./marker-container')
+parsePrefs = require('./parse-prefs')
 prefs = require('./prefs')
 SelectionManager = require('./selection')
 translate = require('./translate')
@@ -39,6 +40,7 @@ viewportUtils = require('./viewport')
 {ContentClick} = Cu.import('resource:///modules/ContentClick.jsm', {})
 {FORWARD, BACKWARD} = SelectionManager
 
+READER_VIEW_PREFIX = 'about:reader?url='
 SPRING_CONSTANT_PREF = 'layout.css.scroll-behavior.spring-constant'
 
 commands = {}
@@ -66,7 +68,13 @@ commands.paste_and_go = helper_paste_and_go.bind(null, null)
 commands.paste_and_go_in_tab = helper_paste_and_go.bind(null, {altKey: true})
 
 commands.copy_current_url = ({vim}) ->
-  utils.writeToClipboard(vim.window.gBrowser.currentURI.spec)
+  url = vim.window.gBrowser.currentURI.spec
+  adjustedUrl =
+    if url.startsWith(READER_VIEW_PREFIX)
+      decodeURIComponent(url[READER_VIEW_PREFIX.length..])
+    else
+      url
+  utils.writeToClipboard(adjustedUrl)
   vim.notify(translate('notification.copy_current_url.success'))
 
 commands.go_up_path = ({vim, count}) ->
@@ -146,18 +154,27 @@ commands.stop_all = ({vim}) ->
 
 
 
-springConstant = {
+scrollData = {
   nonce: null
-  value: null
+  springConstant: null
+  lastRepeat: 0
 }
 
-helper_scroll = (vim, uiEvent, args...) ->
+helper_scroll = (vim, event, args...) ->
   [
     method, type, directions, amounts
-    properties = null, adjustment = 0, name = 'scroll'
+    properties = null, adjustment = 0, name = 'scroll', extra = {}
   ] = args
+
+  elapsed = event.timeStamp - scrollData.lastRepeat
+
+  if event.repeat and elapsed < vim.options['scroll.repeat_timeout']
+    return
+
+  scrollData.lastRepeat = event.timeStamp
+
   options = {
-    method, type, directions, amounts, properties, adjustment
+    method, type, directions, amounts, properties, adjustment, extra
     smooth: (
       prefs.root.get('general.smoothScroll') and
       prefs.root.get("general.smoothScroll.#{type}")
@@ -167,22 +184,23 @@ helper_scroll = (vim, uiEvent, args...) ->
   # Temporarily set Firefox’s “spring constant” pref to get the desired smooth
   # scrolling speed. Reset it `reset_timeout` milliseconds after the last
   # scrolling command was invoked.
-  springConstant.nonce = nonce = {}
-  springConstant.value ?= prefs.root.get(SPRING_CONSTANT_PREF)
+  scrollData.nonce = nonce = {}
+  scrollData.springConstant ?= prefs.root.get(SPRING_CONSTANT_PREF)
   prefs.root.set(
     SPRING_CONSTANT_PREF,
     vim.options["smoothScroll.#{type}.spring-constant"]
   )
   reset = ->
     vim.window.setTimeout((->
-      return unless springConstant.nonce == nonce
-      prefs.root.set(SPRING_CONSTANT_PREF, springConstant.value)
-      springConstant.nonce = null
-      springConstant.value = null
+      return unless scrollData.nonce == nonce
+      prefs.root.set(SPRING_CONSTANT_PREF, scrollData.springConstant)
+      scrollData.nonce = null
+      scrollData.springConstant = null
     ), vim.options['scroll.reset_timeout'])
 
+  {isUIEvent = vim.isUIEvent(event)} = extra
   helpScroll = help.getHelp(vim.window)?.querySelector('.wrapper')
-  if uiEvent or helpScroll
+  if isUIEvent or helpScroll
     activeElement = helpScroll or utils.getActiveElement(vim.window)
     if vim._state.scrollableElements.has(activeElement) or helpScroll
       viewportUtils.scroll(activeElement, options)
@@ -192,35 +210,39 @@ helper_scroll = (vim, uiEvent, args...) ->
   vim._run(name, options, reset)
 
 
-helper_scrollByLinesX = (amount, {vim, uiEvent, count = 1}) ->
+helper_scrollByLinesX = (amount, {vim, event, count = 1}) ->
   distance = prefs.root.get('toolkit.scrollbox.horizontalScrollDistance')
+  boost = if event.repeat then vim.options['scroll.horizontal_boost'] else 1
   helper_scroll(
-    vim, uiEvent, 'scrollBy', 'lines', ['left'], [amount * distance * count * 5]
+    vim, event, 'scrollBy', 'lines', ['left'],
+    [amount * distance * boost * count * 5]
   )
 
-helper_scrollByLinesY = (amount, {vim, uiEvent, count = 1}) ->
+helper_scrollByLinesY = (amount, {vim, event, count = 1}) ->
   distance = prefs.root.get('toolkit.scrollbox.verticalScrollDistance')
+  boost = if event.repeat then vim.options['scroll.vertical_boost'] else 1
   helper_scroll(
-    vim, uiEvent, 'scrollBy', 'lines', ['top'], [amount * distance * count * 20]
+    vim, event, 'scrollBy', 'lines', ['top'],
+    [amount * distance * boost * count * 20]
   )
 
-helper_scrollByPagesY = (amount, type, {vim, uiEvent, count = 1}) ->
+helper_scrollByPagesY = (amount, type, {vim, event, count = 1}) ->
   adjustment = vim.options["scroll.#{type}_page_adjustment"]
   helper_scroll(
-    vim, uiEvent, 'scrollBy', 'pages', ['top'], [amount * count],
+    vim, event, 'scrollBy', 'pages', ['top'], [amount * count],
     ['clientHeight'], adjustment
   )
 
-helper_scrollToX = (amount, {vim, uiEvent}) ->
+helper_scrollToX = (amount, {vim, event}) ->
   helper_mark_last_scroll_position(vim)
   helper_scroll(
-    vim, uiEvent, 'scrollTo', 'other', ['left'], [amount], ['scrollLeftMax']
+    vim, event, 'scrollTo', 'other', ['left'], [amount], ['scrollLeftMax']
   )
 
-helper_scrollToY = (amount, {vim, uiEvent}) ->
+helper_scrollToY = (amount, {vim, event}) ->
   helper_mark_last_scroll_position(vim)
   helper_scroll(
-    vim, uiEvent, 'scrollTo', 'other', ['top'], [amount], ['scrollTopMax']
+    vim, event, 'scrollTo', 'other', ['top'], [amount], ['scrollTopMax']
   )
 
 commands.scroll_left           = helper_scrollByLinesX.bind(null, -1)
@@ -238,22 +260,39 @@ commands.scroll_to_right       = helper_scrollToX.bind(null, Infinity)
 
 helper_mark_last_scroll_position = (vim) ->
   keyStr = vim.options['scroll.last_position_mark']
-  vim._run('mark_scroll_position', {keyStr, notify: false})
+  vim._run('mark_scroll_position', {keyStr, notify: false, addToJumpList: true})
 
 commands.mark_scroll_position = ({vim}) ->
-  vim.enterMode('marks', (keyStr) -> vim._run('mark_scroll_position', {keyStr}))
+  vim._enterMode('marks', (keyStr) ->
+    vim._run('mark_scroll_position', {keyStr})
+  )
   vim.notify(translate('notification.mark_scroll_position.enter'))
 
-commands.scroll_to_mark = ({vim}) ->
-  vim.enterMode('marks', (keyStr) ->
-    unless keyStr == vim.options['scroll.last_position_mark']
-      helper_mark_last_scroll_position(vim)
+commands.scroll_to_mark = ({vim, event}) ->
+  vim._enterMode('marks', (keyStr) ->
+    lastPositionMark = vim.options['scroll.last_position_mark']
     helper_scroll(
-      vim, null, 'scrollTo', 'other', ['top', 'left'], keyStr,
-      ['scrollTopMax', 'scrollLeftMax'], 0, 'scroll_to_mark'
+      vim, event, 'scrollTo', 'other', ['left', 'top'], [0, 0]
+      ['scrollLeftMax', 'scrollTopMax'], 0, 'scroll_to_mark'
+      {keyStr, lastPositionMark, isUIEvent: false}
     )
+    vim.hideNotification()
   )
   vim.notify(translate('notification.scroll_to_mark.enter'))
+
+helper_scroll_to_position = (direction, {vim, event, count = 1}) ->
+  lastPositionMark = vim.options['scroll.last_position_mark']
+  helper_scroll(
+    vim, event, 'scrollTo', 'other', ['left', 'top'], [0, 0]
+    ['scrollLeftMax', 'scrollTopMax'], 0, 'scroll_to_position'
+    {count, direction, lastPositionMark, isUIEvent: false}
+  )
+
+commands.scroll_to_previous_position =
+  helper_scroll_to_position.bind(null, 'previous')
+
+commands.scroll_to_next_position =
+  helper_scroll_to_position.bind(null, 'next')
 
 
 
@@ -428,14 +467,14 @@ commands.tab_close_other = ({vim}) ->
 
 
 
-helper_follow = (name, vim, callback, count = null) ->
+helper_follow = ({name, callback}, {vim, count, callbackOverride = null}) ->
   {window} = vim
   vim.markPageInteraction()
   help.removeHelp(window)
 
   markerContainer = new MarkerContainer({
     window
-    hintChars: vim.options.hint_chars
+    hintChars: vim.options['hints.chars']
     getComplementaryWrappers: (callback) ->
       vim._run(name, {pass: 'complementary'}, ({wrappers, viewport}) ->
         # `markerContainer.container` is `null`ed out when leaving Hints mode.
@@ -452,12 +491,21 @@ helper_follow = (name, vim, callback, count = null) ->
     markerContainer.container
   )
 
+  chooseCallback = (marker, timesLeft, keyStr) ->
+    if callbackOverride
+      {type, href = null, elementIndex} = marker.wrapper
+      return callbackOverride({type, href, id: elementIndex, timesLeft})
+    else
+      return callback(marker, timesLeft, keyStr)
+
   # Enter Hints mode immediately, with an empty set of markers. The user might
-  # press keys before any hints have been generated. Those key presses should be
+  # press keys before any hints have been generated. Those keypresses should be
   # handled in Hints mode, not Normal mode.
-  vim.enterMode('hints', {
-    markerContainer, callback, count
-    sleep: vim.options.hints_sleep
+  vim._enterMode('hints', {
+    markerContainer, count
+    callback: chooseCallback
+    matchText: vim.options['hints.match_text']
+    sleep: vim.options['hints.sleep']
   })
 
   injectHints = ({wrappers, viewport, pass}) ->
@@ -467,7 +515,7 @@ helper_follow = (name, vim, callback, count = null) ->
     if wrappers.length == 0
       if pass in ['single', 'second'] and markerContainer.markers.length == 0
         vim.notify(translate('notification.follow.none'))
-        vim.enterMode('normal')
+        vim._enterMode('normal')
     else
       markerContainer.injectHints(wrappers, viewport, pass)
 
@@ -476,7 +524,9 @@ helper_follow = (name, vim, callback, count = null) ->
 
   vim._run(name, {pass: 'auto'}, injectHints)
 
-helper_follow_clickable = (options, {vim, count = 1}) ->
+helper_follow_clickable = (options, args) ->
+  {vim} = args
+
   callback = (marker, timesLeft, keyStr) ->
     {inTab, inBackground} = options
     {type, elementIndex} = marker.wrapper
@@ -485,9 +535,9 @@ helper_follow_clickable = (options, {vim, count = 1}) ->
     {window} = vim
 
     switch
-      when keyStr.startsWith(vim.options.hints_toggle_in_tab)
+      when keyStr.startsWith(vim.options['hints.toggle_in_tab'])
         inTab = not inTab
-      when keyStr.startsWith(vim.options.hints_toggle_in_background)
+      when keyStr.startsWith(vim.options['hints.toggle_in_background'])
         inTab = true
         inBackground = not inBackground
       else
@@ -518,16 +568,21 @@ helper_follow_clickable = (options, {vim, count = 1}) ->
         }, vim.browser)
         reset()
       )
-    else
+
+    # The point of “clicking” scrollable elements is focusing them (which is
+    # done above) so that scrolling commands may scroll them. Simulating a click
+    # here usually _unfocuses_ the element.
+    else if type != 'scrollable'
       vim._run('click_marker_element', {
         elementIndex, type
+        browserOffset: vim._getBrowserOffset()
         preventTargetBlank: vim.options.prevent_target_blank
       })
 
     return not isLast
 
   name = if options.inTab then 'follow_in_tab' else 'follow'
-  helper_follow(name, vim, callback, count)
+  helper_follow({name, callback}, args)
 
 commands.follow =
   helper_follow_clickable.bind(null, {inTab: false, inBackground: true})
@@ -538,19 +593,30 @@ commands.follow_in_tab =
 commands.follow_in_focused_tab =
   helper_follow_clickable.bind(null, {inTab: true, inBackground: false})
 
-commands.follow_in_window = ({vim}) ->
+helper_follow_in_window = (options, args) ->
+  {vim} = args
+
   callback = (marker) ->
     vim._focusMarkerElement(marker.wrapper.elementIndex)
     {href} = marker.wrapper
-    vim.window.openLinkIn(href, 'window', {}) if href
+    vim.window.openLinkIn(href, 'window', options) if href
     return false
-  helper_follow('follow_in_tab', vim, callback)
+
+  helper_follow({name: 'follow_in_tab', callback}, args)
+
+commands.follow_in_window =
+  helper_follow_in_window.bind(null, {})
+
+commands.follow_in_private_window =
+  helper_follow_in_window.bind(null, {private: true})
 
 commands.follow_multiple = (args) ->
   args.count = Infinity
   commands.follow(args)
 
-commands.follow_copy = ({vim}) ->
+commands.follow_copy = (args) ->
+  {vim} = args
+
   callback = (marker) ->
     property = switch marker.wrapper.type
       when 'link'
@@ -561,13 +627,30 @@ commands.follow_copy = ({vim}) ->
         '_selection'
     helper_copy_marker_element(vim, marker.wrapper.elementIndex, property)
     return false
-  helper_follow('follow_copy', vim, callback)
 
-commands.follow_focus = ({vim}) ->
+  helper_follow({name: 'follow_copy', callback}, args)
+
+commands.follow_focus = (args) ->
+  {vim} = args
+
   callback = (marker) ->
     vim._focusMarkerElement(marker.wrapper.elementIndex, {select: true})
     return false
-  helper_follow('follow_focus', vim, callback)
+
+  helper_follow({name: 'follow_focus', callback}, args)
+
+commands.open_context_menu = (args) ->
+  {vim} = args
+
+  callback = (marker) ->
+    {type, elementIndex} = marker.wrapper
+    vim._run('click_marker_element', {
+      elementIndex, type
+      browserOffset: vim._getBrowserOffset()
+    })
+    return false
+
+  helper_follow({name: 'follow_context', callback}, args)
 
 commands.click_browser_element = ({vim}) ->
   {window} = vim
@@ -601,8 +684,22 @@ commands.click_browser_element = ({vim}) ->
     shape = getElementShape(element)
     return unless shape.nonCoveredPoint
 
+    # The tabs and their close buttons as well as the tab bar scroll arrows get
+    # better hints, since switching or closing tabs is the most common use case
+    # for the `eb` command.
+    isTab = element.classList?.contains('tabbrowser-tab')
+    isPrioritized =
+      isTab or
+      element.classList?.contains('tab-close-button') or
+      element.classList?.contains('scrollbutton-up') or
+      element.classList?.contains('scrollbutton-down')
+
     length = markerElements.push(element)
-    return {type, shape, elementIndex: length - 1}
+    return {
+      type, shape, isTab, isPrioritized,
+      combinedArea: shape.area,
+      elementIndex: length - 1,
+    }
 
   callback = (marker) ->
     element = markerElements[marker.wrapper.elementIndex]
@@ -622,14 +719,15 @@ commands.click_browser_element = ({vim}) ->
         # next tick. This might be true for other buttons as well.
         utils.nextTick(window, ->
           utils.focusElement(element)
+          browserOffset = {x: window.screenX, y: window.screenY}
           switch
             when element.localName == 'tab'
               # Only 'mousedown' seems to be able to activate tabs.
-              utils.simulateMouseEvents(element, ['mousedown'])
+              utils.simulateMouseEvents(element, ['mousedown'], browserOffset)
             when element.closest('tab')
               # If `.click()` is used on a tab close button, its tab will be
               # selected first, which might cause the selected tab to change.
-              utils.simulateMouseEvents(element, 'click-xul')
+              utils.simulateMouseEvents(element, 'click-xul', browserOffset)
             else
               # `.click()` seems to trigger more buttons (such as NoScript’s
               # button and Firefox’s “hamburger” menu button) than simulating
@@ -648,8 +746,9 @@ commands.click_browser_element = ({vim}) ->
 
     markerContainer = new MarkerContainer({
       window
-      hintChars: vim.options.hint_chars
+      hintChars: vim.options['hints.chars']
       adjustZoom: false
+      minWeightDiff: 0
       getComplementaryWrappers: (callback) ->
         newWrappers = markableElements.find(
           window, filter.bind(null, {complementary: true})
@@ -662,8 +761,48 @@ commands.click_browser_element = ({vim}) ->
       markerContainer.container
     )
 
-    markerContainer.injectHints(wrappers, viewport, 'single')
-    vim.enterMode('hints', {markerContainer, callback})
+    [firstWrappers, secondWrappers] =
+      utils.partition(wrappers, (wrapper) -> wrapper.isPrioritized)
+
+    numChars = markerContainer.alphabet.length
+    numPrimary = markerContainer.primaryHintChars.length
+    numTabs = firstWrappers.filter(({isTab}) -> isTab).length
+    index = 0
+
+    for wrapper in firstWrappers
+      if wrapper.isTab
+        # Given the hint chars `abc de`, give the tabs weights so that the hints
+        # consistently become `a b ca cb cc cd cea ceb cec ced ceea ceeb` and so
+        # on. The rule is that the weight of a tab must be larger than the sum
+        # of all tabs with a longer hint. We start out at `1` and then use
+        # smaller and smaller fractions. This is to make sure that the tabs get
+        # consistent hints as the number of tabs or the size of the window
+        # changes.
+        exponent = (index - numPrimary + 1) // (numChars - 1) + 1
+        wrapper.combinedArea = 1 / numChars ** exponent
+        index += 1
+      else
+        # Make sure that the tab close buttons and the tab bar scroll buttons
+        # come after all the tabs. Treating them all as the same size is fine.
+        # Their sum must be small enough in order not to affect the tab hints.
+        # It might look like using `0` is a good idea, but that results in
+        # increasingly worse hints the more tab close buttons there are.
+        wrapper.combinedArea = 1 / numChars ** numTabs
+
+    # Since most of the best hint characters might be used for the tabs, make
+    # sure that all other elements don’t get really bad hints. First, favor
+    # larger elements by sorting them. Then, give them all the same weight so
+    # that larger elements (such as the location bar, search bar, the web
+    # console input and other large areas in the devtools) don’t overpower the
+    # smaller ones. The usual “the larger the element, the better the hint” rule
+    # doesn’t really apply the same way for browser UI elements as in web pages.
+    secondWrappers.sort((a, b) -> b.combinedArea - a.combinedArea)
+    for wrapper in secondWrappers
+      wrapper.combinedArea = 1
+
+    markerContainer.injectHints(firstWrappers, viewport, 'first')
+    markerContainer.injectHints(secondWrappers, viewport, 'second')
+    vim._enterMode('hints', {markerContainer, callback, matchText: false})
 
   else
     vim.notify(translate('notification.follow.none'))
@@ -674,7 +813,8 @@ helper_follow_pattern = (type, {vim}) ->
     pattern_attrs: vim.options.pattern_attrs
     patterns: vim.options["#{type}_patterns"]
   }
-  vim._run('follow_pattern', {type, options})
+  browserOffset = vim._getBrowserOffset()
+  vim._run('follow_pattern', {type, browserOffset, options})
 
 commands.follow_previous = helper_follow_pattern.bind(null, 'prev')
 
@@ -684,16 +824,19 @@ commands.focus_text_input = ({vim, count}) ->
   vim.markPageInteraction()
   vim._run('focus_text_input', {count})
 
-helper_follow_selectable = ({select}, {vim}) ->
+helper_follow_selectable = ({select}, args) ->
+  {vim} = args
+
   callback = (marker) ->
     vim._run('element_text_select', {
       elementIndex: marker.wrapper.elementIndex
       full: select
       scroll: select
     })
-    vim.enterMode('caret', select)
+    vim._enterMode('caret', {select})
     return false
-  helper_follow('follow_selectable', vim, callback)
+
+  helper_follow({name: 'follow_selectable', callback}, args)
 
 commands.element_text_caret =
   helper_follow_selectable.bind(null, {select: false})
@@ -701,11 +844,14 @@ commands.element_text_caret =
 commands.element_text_select =
   helper_follow_selectable.bind(null, {select: true})
 
-commands.element_text_copy = ({vim}) ->
+commands.element_text_copy = (args) ->
+  {vim} = args
+
   callback = (marker) ->
     helper_copy_marker_element(vim, marker.wrapper.elementIndex, '_selection')
     return false
-  helper_follow('follow_selectable', vim, callback)
+
+  helper_follow({name: 'follow_selectable', callback}, args)
 
 helper_copy_marker_element = (vim, elementIndex, property) ->
   if property == '_selection'
@@ -729,27 +875,35 @@ findStorage = {
 }
 
 helper_find_from_top_of_viewport = (vim, direction, callback) ->
-  return if findStorage.busy
   if vim.options.find_from_top_of_viewport
-    findStorage.busy = true
     vim._run('find_from_top_of_viewport', {direction}, ->
-      findStorage.busy = false
       callback()
     )
   else
     callback()
 
 helper_find = ({highlight, linksOnly = false}, {vim}) ->
+  if findStorage.busy
+    # Make sure to enter find mode here, since that’s where `findStorage.busy`
+    # is reset to `false` again. Otherwise we can get stuck in the “busy” state.
+    vim._enterMode('find')
+    return
+
   helpSearchInput = help.getSearchInput(vim.window)
   if helpSearchInput
     helpSearchInput.select()
     return
 
-  # In case `helper_find_from_top_of_viewport` is slow, make sure that keys
-  # pressed before the find bar input is focsued doesn’t trigger commands.
-  vim.enterMode('find')
+  # Important: Enter Find mode immediately. See `onInput` for Find mode.
+  findStorage.busy = true
+  vim._enterMode('find')
 
   helper_mark_last_scroll_position(vim)
+  vim._run('mark_scroll_position', {
+    keyStr: vim.options['scroll.last_find_mark']
+    notify: false
+  })
+
   helper_find_from_top_of_viewport(vim, FORWARD, ->
     return unless vim.mode == 'find'
     findBar = vim.window.gBrowser.getFindBar()
@@ -771,25 +925,46 @@ commands.find_highlight_all = helper_find.bind(null, {highlight: true})
 commands.find_links_only = helper_find.bind(null, {linksOnly: true})
 
 helper_find_again = (direction, {vim}) ->
+  return if findStorage.busy
+
   findBar = vim.window.gBrowser.getFindBar()
   if findStorage.lastSearchString.length == 0
     vim.notify(translate('notification.find_again.none'))
     return
 
+  findStorage.busy = true
+
   helper_mark_last_scroll_position(vim)
   helper_find_from_top_of_viewport(vim, direction, ->
     findBar._findField.value = findStorage.lastSearchString
 
-    # Temporarily hack `.onFindResult` to be able to know when the asynchronous
-    # `.onFindAgainCommand` is done.
+    # `.onFindResult` is temporarily hacked to be able to know when the
+    # asynchronous `.onFindAgainCommand` is done. When PDFs are shown using
+    # PDF.js, `.updateControlState` is called instead of `.onFindResult`, so
+    # hack that one too.
     originalOnFindResult = findBar.onFindResult
+    originalUpdateControlState = findBar.updateControlState
+
     findBar.onFindResult = (data) ->
       # Prevent the find bar from re-opening if there are no matches.
       data.storeResult = false
       findBar.onFindResult = originalOnFindResult
+      findBar.updateControlState = originalUpdateControlState
       findBar.onFindResult(data)
+      callback()
+
+    findBar.updateControlState = (args...) ->
+      # Firefox inconsistently _doesn’t_ re-open the find bar if there are no
+      # matches here, so no need to take care of that in this case.
+      findBar.onFindResult = originalOnFindResult
+      findBar.updateControlState = originalUpdateControlState
+      findBar.updateControlState(args...)
+      callback()
+
+    callback = ->
       message = findBar._findStatusDesc.textContent
       vim.notify(message) if message
+      findStorage.busy = false
 
     findBar.onFindAgainCommand(not direction)
   )
@@ -806,12 +981,13 @@ commands.window_new = ({vim}) ->
 commands.window_new_private = ({vim}) ->
   vim.window.OpenBrowserWindow({private: true})
 
-commands.enter_mode_ignore = ({vim}) ->
-  vim.enterMode('ignore', {type: 'explicit'})
+commands.enter_mode_ignore = ({vim, blacklist = false}) ->
+  type = if blacklist then 'blacklist' else 'explicit'
+  vim._enterMode('ignore', {type})
 
 # Quote next keypress (pass it through to the page).
 commands.quote = ({vim, count = 1}) ->
-  vim.enterMode('ignore', {type: 'explicit', count})
+  vim._enterMode('ignore', {type: 'explicit', count})
 
 commands.enter_reader_view = ({vim}) ->
   button = vim.window.document.getElementById('reader-mode-button')
@@ -822,13 +998,49 @@ commands.enter_reader_view = ({vim}) ->
 
 commands.reload_config_file = ({vim}) ->
   vim._parent.emit('shutdown')
-  config.load(vim._parent, (status) -> switch status
+  config.load(vim._parent, {allowDeprecated: false}, (status) -> switch status
     when null
       vim.notify(translate('notification.reload_config_file.none'))
     when true
       vim.notify(translate('notification.reload_config_file.success'))
     else
       vim.notify(translate('notification.reload_config_file.failure'))
+  )
+
+commands.edit_blacklist = ({vim}) ->
+  url = vim.browser.currentURI.spec
+  location = new vim.window.URL(url)
+  newPattern = if location.host then "*#{location.host}*" else location.href
+  delimiter = '  '
+  blacklistString = prefs.get('blacklist')
+
+  if vim._isBlacklisted(url)
+    blacklist = parsePrefs.parseSpaceDelimitedString(blacklistString).parsed
+    [matching, nonMatching] = utils.partition(blacklist, (string, index) ->
+      return vim.options.blacklist[index].test(url)
+    )
+    newBlacklistString = "
+      #{matching.join(delimiter)}\
+      #{delimiter.repeat(7)}\
+      #{nonMatching.join(delimiter)}
+    "
+    extraMessage = translate('pref.blacklist.extra.is_blacklisted')
+  else
+    newBlacklistString = "#{newPattern}#{delimiter}#{blacklistString}"
+    extraMessage = translate('pref.blacklist.extra.added', newPattern)
+
+  message = """
+    #{translate('pref.blacklist.title')}: #{translate('pref.blacklist.desc')}
+
+    #{extraMessage}
+  """
+
+  vim._modal('prompt', [message, newBlacklistString.trim()], (input) ->
+    return if input == null
+    # Just set the blacklist as if the user had typed it in the Add-ons Manager,
+    # and let the regular pref parsing take care of it.
+    prefs.set('blacklist', input)
+    vim._onLocationChange(url)
   )
 
 commands.help = ({vim}) ->
@@ -839,9 +1051,19 @@ commands.dev = ({vim}) ->
 
 commands.esc = ({vim}) ->
   vim._run('esc')
+  vim.hideNotification()
+
+  # Firefox does things differently when blurring the location bar, depending on
+  # whether the autocomplete popup is open or not. To be consistent, always
+  # close the autocomplete popup before blurring.
+  vim.window.gURLBar.closePopup()
+
   utils.blurActiveBrowserElement(vim)
   vim.window.gBrowser.getFindBar().close()
-  MarkerContainer.remove(vim.window) # Better safe than sorry.
+
+  # Better safe than sorry.
+  MarkerContainer.remove(vim.window)
+  vim._parent.resetCaretBrowsing()
 
   # Calling `.hide()` when the toolbar is not open can destroy it for the rest
   # of the Firefox session. The code here is taken from the `.toggle()` method.

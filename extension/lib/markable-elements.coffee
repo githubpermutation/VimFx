@@ -28,6 +28,8 @@ viewportUtils = require('./viewport')
 Element = Ci.nsIDOMElement
 XULDocument = Ci.nsIDOMXULDocument
 
+MIN_TEXTNODE_SIZE = 4
+
 find = (window, filter, selector = '*') ->
   viewport = viewportUtils.getWindowViewport(window)
   wrappers = []
@@ -52,7 +54,7 @@ getMarkableElements = (
     continue unless element instanceof Element
     # `getRects` is fast and filters out most elements, so run it first of all.
     rects = getRects(element, viewport)
-    continue unless rects.length > 0
+    continue unless rects.insideViewport.length > 0
     continue unless wrapper = filter(
       element, (elementArg, tryRight = 1) ->
         return getElementShape(
@@ -82,7 +84,7 @@ getAllElements = (document, selector) ->
   # Ideally we should find a way to find all elements without duplicates.
   elements = new Set()
   getAllRegular = (element) ->
-    # The first time `zF` is run `.getElementsByTagName('*')` may oddly include
+    # The first time `eb` is run `.getElementsByTagName('*')` may oddly include
     # `undefined` in its result! Filter those out. (Also, `selector` is ignored
     # here since it doesn’t make sense in XUL documents because of all the
     # trickery around anonymous elements.)
@@ -95,6 +97,7 @@ getAllElements = (document, selector) ->
       continue unless child instanceof Element
       elements.add(child)
       getAllRegular(child)
+      getAllAnonymous(child)
     return
   getAllRegular(document.documentElement)
   return Array.from(elements)
@@ -105,10 +108,14 @@ getRects = (element, viewport) ->
   # However, if `element` is inline and line-wrapped, then it returns one
   # rectangle for each line, since each line may be of different length, for
   # example. That allows us to properly add hints to line-wrapped links.
-  return Array.filter(
-    element.getClientRects(),
-    (rect) -> viewportUtils.isInsideViewport(rect, viewport)
-  )
+  rects = element.getClientRects()
+  return {
+    all: rects,
+    insideViewport: Array.filter(
+      rects,
+      (rect) -> viewportUtils.isInsideViewport(rect, viewport)
+    )
+  }
 
 # Returns the “shape” of an element:
 #
@@ -118,22 +125,32 @@ getRects = (element, viewport) ->
 #   frame, as well as the rectangle that the coordinates occur in. It is `null`
 #   if the element is outside `viewport` or entirely covered by other elements.
 # - `area`: The area of the part of the element that is inside the viewport.
+# - `width`: The width of the visible rect at `nonCoveredPoint`.
+# - `textOffset`: The distance between the left edge of the element and the left
+#   edge of its text vertically near `nonCoveredPoint`. Might be `null`. The
+#   calculation might stop early if `isBlock`.
+# - `isBlock`: `true` if the element is a block and has several lines of text
+#   (which is the case for “cards” with an image to the left and a title as well
+#   as some text to the right (where the entire “card” is a link)). This is used
+#   to place the the marker at the edge of the block.
 getElementShape = (elementData, tryRight, rects = null) ->
   {viewport, element} = elementData
-  result = {nonCoveredPoint: null, area: 0}
+  result =
+    {nonCoveredPoint: null, area: 0, width: 0, textOffset: null, isBlock: false}
 
   rects ?= getRects(element, viewport)
   totalArea = 0
   visibleRects = []
-  for rect in rects
+  for rect, index in rects.insideViewport
     visibleRect = viewportUtils.adjustRectToViewport(rect, viewport)
     continue if visibleRect.area == 0
+    visibleRect.index = index
     totalArea += visibleRect.area
     visibleRects.push(visibleRect)
 
   if visibleRects.length == 0
-    if rects.length == 1 and totalArea == 0
-      [rect] = rects
+    if rects.all.length == 1 and totalArea == 0
+      [rect] = rects.all
       if rect.width > 0 or rect.height > 0
         # If we get here, it means that everything inside `element` is floated
         # and/or absolutely positioned (and that `element` hasn’t been made to
@@ -150,13 +167,52 @@ getElementShape = (elementData, tryRight, rects = null) ->
   result.area = totalArea
 
   # Even if `element` has a visible rect, it might be covered by other elements.
+  nonCoveredPoint = null
+  nonCoveredPointRect = null
   for visibleRect in visibleRects
     nonCoveredPoint = getFirstNonCoveredPoint(
       elementData, visibleRect, tryRight
     )
-    break if nonCoveredPoint
+    if nonCoveredPoint
+      nonCoveredPointRect = visibleRect
+      break
 
+  return result unless nonCoveredPoint
   result.nonCoveredPoint = nonCoveredPoint
+
+  result.width = nonCoveredPointRect.width
+
+  lefts = []
+  smallestBottom = Infinity
+  hasSingleRect = (rects.all.length == 1)
+
+  utils.walkTextNodes(element, (node) ->
+    unless node.data.trim() == ''
+      for {bounds} in node.getBoxQuads()
+        if bounds.width < MIN_TEXTNODE_SIZE or bounds.height < MIN_TEXTNODE_SIZE
+          continue
+
+        if utils.overlaps(bounds, nonCoveredPointRect)
+          lefts.push(bounds.left)
+
+        if hasSingleRect
+          # The element is likely a block and has several lines of text; ignore
+          # the `textOffset` (see the description of `textOffset` at the
+          # beginning of the function).
+          if bounds.top > smallestBottom
+            result.isBlock = true
+            return true
+
+          if bounds.bottom < smallestBottom
+            smallestBottom = bounds.bottom
+
+    return false
+  )
+
+  if lefts.length > 0
+    result.textOffset =
+      Math.round(Math.min(lefts...) - nonCoveredPointRect.left)
+
   return result
 
 getFirstNonCoveredPoint = (elementData, elementRect, tryRight) ->
@@ -180,7 +236,7 @@ getFirstNonCoveredPoint = (elementData, elementRect, tryRight) ->
   {left, top, bottom, height} = elementRect
   return tryPoint(
     elementData, elementRect,
-    left, +1, Math.floor(top + height / 2), 0, tryRight
+    left, +1, Math.round(top + height / 2), 0, tryRight
   )
 
 # Tries a point `(x + dx, y + dy)`. Returns `(x, y)` (and the frame offset) if

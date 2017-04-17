@@ -1,6 +1,6 @@
 {
   "name": "VimFx",
-  "version": "0.17.4",
+  "version": "0.20.10",
   "firefoxVersions": {
     "min": "45.0",
     "max": "*"
@@ -12,29 +12,29 @@
     "addons-linter": "npm run gulp -- xpi && addons-linter -o text build/VimFx.xpi"
   },
   "dependencies": {
-    "n-ary-huffman": "^2.1.1",
-    "vim-like-key-notation": "^1.0.0"
+    "n-ary-huffman": "^3.1.0",
+    "vim-like-key-notation": "^1.0.1"
   },
   "devDependencies": {
-    "addons-linter": "^0.14.0",
-    "coffee-script": "jashkenas/coffeescript#87216ea5b64804aac584966b60063ddc77c69f2b",
-    "coffeelint": "^1.15.7",
+    "addons-linter": "^0.17.0",
+    "coffee-script": "^1.12.4",
+    "coffeelint": "^1.16.0",
     "coffeelint-forbidden-keywords": "^0.1.1",
     "gulp": "^3.9.1",
-    "gulp-coffee": "^2.3.2",
+    "gulp-coffee": "^2.3.4",
     "gulp-coffeelint": "^0.6.0",
-    "gulp-git": "^1.8.0",
-    "gulp-header": "^1.8.7",
-    "gulp-mustache": "^2.2.0",
+    "gulp-git": "^2.1.0",
+    "gulp-header": "^1.8.8",
+    "gulp-mustache": "^2.3.0",
     "gulp-preprocess": "^2.0.0",
     "gulp-sloc": "flosse/gulp-sloc#sloc-v0.1.x",
     "gulp-tap": "^0.1.3",
-    "gulp-zip": "^3.2.0",
-    "marked": "^0.3.5",
-    "merge2": "^1.0.2",
-    "request": "^2.73.0",
+    "gulp-zip": "^4.0.0",
+    "marked": "^0.3.6",
+    "merge2": "^1.0.3",
+    "request": "^2.81.0",
     "require-precompute": "^0.2.0",
-    "rimraf": "^2.5.3",
+    "rimraf": "^2.6.1",
     "run-sequence": "^1.2.2"
   }
 }

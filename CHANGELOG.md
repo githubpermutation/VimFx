@@ -1,3 +1,271 @@
+### 0.20.10 (2017-03-25)
+
+- Improved: Autofocus is now prevented when going back in history on pages that
+  use `history.pushState()` (in other words, on the 'popstate' event).
+- Updated locale: ja. Thanks to Kaoru Esashika (@pluser)!
+
+### 0.20.9 (2017-02-21)
+
+- Fixed: The `yy` command now works as expected in Reader Mode.
+
+### 0.20.8 (2017-01-14)
+
+- Improved: The scrolling commands now scroll the closest scrollable parent of
+  the currently focused element (if it is not scrollable itself). This is
+  noticeable for Twitter’s modals, which are often scrollable. No longer any
+  need to use the `f` or `ef` commands to scroll those modals!
+
+### 0.20.7 (2017-01-07)
+
+- Improved: The `[` and `]` commands now work in Google search results.
+- Improved: You can now show the “emoji picker” of the “like” button on Facebook
+  by using the `ef` command.
+- Updated locale: de. Thanks to @interleaved!
+
+### 0.20.6 (2016-12-16)
+
+- Fixed: The `'`, `g[` and `g]` commands no longer crash. (Regression since
+  0.20.5.)
+- Fixed: The `ef` command can now focus elements in deeply nested frames again.
+  (Regression since 0.19.0.)
+- Fixed: `vimfx.addOptionOverrides` and `vimfx.addKeyOverrides` are now properly
+  undone when reloading a config file (`gC`).
+- Improved: Hint markers for elements with multiline text no longer cover the
+  text.
+- Updated locale: de. Thanks to @interleaved!
+
+### 0.20.5 (2016-12-04)
+
+- Fixed: Scrolling by holding `d`, `u`, `<space>` or `<s-space>` no longer goes
+  slower and slower (and finally grinding to a halt) on long pages with lots of
+  elements. (See also the [`scroll.repeat_timeout`] pref.)
+- Improved: All config API functions now validate all their parameters properly.
+  This provides a better user experience, and, most importantly, prevents VimFx
+  from crashing on certain invalid input.
+
+[`scroll.repeat_timeout`]: https://github.com/akhodakivskiy/VimFx/blob/58deb3f7b7c470a4d705f1dabf7aa13e095e8d09/documentation/options.md#smooth-scrolling
+
+### 0.20.4 (2016-11-16)
+
+- Fixed: The `n` and `N` commands now work in Firefox’s PDF viewer.
+- Fixed: The `eb` command can now click the tab bar scroll buttons.
+- Fixed: Elements marked by the `eb` command now correctly get hints based on
+  their area again.
+- Improved: The `eb` command now favors the browser tabs and their close
+  buttons, giving them better hints.
+- Improved: The hints given to the browser tabs by the `eb` command are now
+  consistent no matter how many tabs you have open. This means that the first
+  tab always gets the same hint, the second tab always get the same hint, and so
+  on.
+- Improved: Hint markers are now placed next to the text of the element if
+  appropriate. For example, the hint marker for a button with centered text is
+  now placed just to the left of the text rather than at the left edge of
+  button. This is nice because it means that hint markers usually end up where
+  you were just reading.
+- Improved: The positioning of hint markers has been fine-tuned by a pixel or so
+  in some cases.
+- Improved: Custom styled checkboxes and radio buttons now get hint markers
+  faster (they are now found in the first pass rather than the second).
+- Improved: Compatibility with the [Tab Center] add-on.
+- Improved: Blurring the location bar is now more consistent. Previously, its
+  text wasn’t reset if the autocomplete popup was open when you pressed
+  `<escape>` to blur it.
+- Fixed: An edge case where the wrong hint markers could be highlighted.
+
+[Tab Center]: https://testpilot.firefox.com/experiments/tab-center/
+
+### 0.20.3 (2016-10-22)
+
+- Improved: Full page scrolling now recognizes the fixed footer on medium.com.
+- Fixed: Scrollable element can now be focused with the `f` command again (not
+  just with the `ef` command). (Regression since 0.19.0.)
+- Fixed: `<escape>` is no longer accidentally leaked to the page when used to
+  blur text inputs. This allows blurring text inputs in modals without closing
+  the modal (which `<escape>` commonly does otherwise).
+
+### 0.20.2 (2016-10-16)
+
+- Fixed: Text inputs and links inside frames can now be focused using hint
+  commands again. (Regression since 0.19.0.)
+- Improved: Previously focused text inputs inside frames no longer steal the
+  focus when entering Caret mode in that frame.
+- Improved: When several hint markers have the same hint (because their links
+  go to the same place), the _largest_ of those links is now chosen when
+  activating that hint. This might be noticeable via focus styling.
+- Updated locale: zh-CN. Thanks to @av2000ii!
+
+### 0.20.1 (2016-10-09)
+
+- Improved: Caret mode is now a bit more robust. It can no longer make you end
+  up with [Firefox’s own Caret mode] accidentally enabled.
+- Improved: If you try use for example `<ctrl>-j` as a keyboard shortcut, VimFx
+  will now tell you that you probably want `<c-j>` instead.
+- Fixed: Using a keyboard shortcut to switch keyboard layout in GNOME while
+  inside a text input no longer causes the focus of that text input to be lost
+  when the Prevent autofocus option is enabled.
+- Updated locale: zh-CN. Thanks to @av2000ii!
+
+[Firefox’s own Caret mode]: http://kb.mozillazine.org/Accessibility_features_of_Firefox#Allow_text_to_be_selected_with_the_keyboard
+
+### 0.20.0 (2016-10-02)
+
+- Added: The `g[` and `g]` commands, which let you scroll to previous and next
+  scroll positions of the current page. This is similar to Vim’s jump list.
+- Added: The `/` mark. Pressing `'/` takes you to the scroll position before the
+  last `/`, `a/` or `g/`.
+- Fixed: Pressing `''` multiple times in a row now flips back and forth
+  between two scroll positions as expected.
+- Fixed: Version 0.19.0 claimed to include the following improvement: “The hint
+  marker for a smaller element can no longer cover the hint marker for a larger
+  element (unless you press `<c-space>` to rotate them).” However, a silly
+  mistake caused that improvement not to work. Now it does. For real.
+- Fixed: All VimFx commands that copy text to the clipboard are now made sure to
+  also copy to the “selection clipboard” (if your system has such a thing). For
+  example, if you copy text using the `yv` command, the `p` command now uses
+  that copied text as expected.
+
+### 0.19.1 (2016-09-26)
+
+- Fixed: The `'` command no longer crashes. (Regression since 0.19.0.)
+
+### 0.19.0 (2016-09-25)
+
+#### Changes and improvements to Hints mode
+
+**New feature:** Hint markers can now be filtered by element text, similar to
+Vimium, Vimperator and Pentadactyl. This is useful for people who simply prefer
+that workflow, and for clicking tiny pagination links (simply type its number!).
+
+By default, filtering by element text is done by typing _uppercase_ characters
+(hold down shift!). All characters other than the hint characters are now used
+to filter hint markers by element text (rather than just being ignored). Do you
+prefer filtering by element text, but dislike typing uppercase letters? Have a
+look at how [hint characters] work to make things the other way around!
+
+The markers with the best hint are now highlighted with a different color. You
+may at any time press `<enter>` to activate those markers (or `<c-enter>` or
+`<a-enter>` to change where and how to open links, just like you can hold ctrl
+or alt for the last hint character).
+
+Because of the above new features, the following default **Hints mode shortcuts
+had to be changed:**
+
+- `<space>` → `<c-space>` (`<s-space>` is left untouched)
+- `<s->` → `<c-s->` (hold ctrl _and_ shift to peek through hint markers)
+- `<enter>` → `<up>`
+- `<c-enter>` → `<c-backspace>`
+
+To make it easier to see the element text, hint markers are now nudged to the
+left if they cover the text.
+
+Other hint marker improvements:
+
+- Hint markers are now 20% smaller by default. While trying to match text sizes
+  set by your operating system, they ended up a bit too large on most systems.
+  Check out the [Styling] documentation if you’d like to change the font size.
+- Hint markers now have stronger contrast between the background color and the
+  text color, which should make them easier to read.
+- The CSS for hint markers have been improved, making it easier to use custom
+  [Styling].
+- When several elements have the same area, the best hint is now correctly given
+  to the _first_ of those elements. Previously, it happened to be the other way
+  around.
+- The hint marker for a smaller element can no longer cover the hint marker for
+  a larger element (unless you press `<c-space>` to rotate them).
+- Hint markers are now better positioned when having zoomed the page in or out.
+- Hints mode is now more robust in general. Several race conditions have been
+  fixed.
+
+[hint characters]: https://github.com/akhodakivskiy/VimFx/blob/8bafdf0454043c1630bac8b13d13f1fb4e5ee9e7/documentation/options.md#hint-characters
+[Styling]: https://github.com/akhodakivskiy/VimFx/blob/8bafdf0454043c1630bac8b13d13f1fb4e5ee9e7/documentation/styling.md
+
+#### Other updates
+
+- Added: The ability to **export, import and reset all** VimFx options. There
+  are three shiny new buttons for this in VimFx’s options page in the Add-ons
+  Manager!
+- Added: The `gB` command, which lets you **quickly blacklist** (and
+  un-blacklist) sites.
+- Added: The `ec` command, for opening the context menu of elements.
+- Added: The `ep` command, for opening links in new private windows.
+- Improved: `h`, `l`, `j` and `k` now feel more like scrolling with the arrow
+  keys when held down, by boosting the scrolling speed. See the
+  [`scroll.horizontal_boost` and `scroll.vertical_boost`][scroll-boost] options
+  for more information.
+- Fixed: VimFx’s find bar integration is now much more robust. Most notably, if
+  you start typing directly after pressing `/` and Firefox is slow at opening
+  the find bar, your keypresses can no longer trigger VimFx commands or Firefox
+  built-in commands.
+- Improved: VimFx no longer leaks keypresses to the web page in some modes. (For
+  example, counts in Caret mode).
+- Improved: The `eb` command now finds more clickable elements in the devtools.
+- Changed: `vimfx.addKeyOverrides` no longer lets you easily break for example
+  Hints mode, by now only being applied to Normal mode. You might need to change
+  your matchers from `(location, mode) => ...` to simply `location => ...`.
+  (Breaking API change.)
+- Changed: The object passed to custom commands (and custom modes) no longer
+  contains a `uiEvent` property. Instead, there’s an `event` property. This
+  property can be used the same way if you check `vim.isUIEvent(event)` first.
+  (Breaking API change.)
+
+[scroll-boost]: https://github.com/akhodakivskiy/VimFx/blob/8bafdf0454043c1630bac8b13d13f1fb4e5ee9e7/documentation/options.md#scrollhorizontal_boost-and-scrollvertical_boost
+
+### 0.18.1 (2016-08-27)
+
+- Fixed: `vimfx.addOptionOverrides` no longer crashes on startup.
+- Fixed: `vimfx.addOptionOverrides` can now override the `prevent_autofocus`
+  pref again.
+
+### 0.18.0 (2016-08-20)
+
+#### Changed default shortcuts
+
+Some default keyboard shortcuts have been changed.
+
+- Hint commands. Many of the old ones were difficult to remember, and there was
+  no space for adding new ones.
+
+  - `gf` → `et` (t as in tab)
+  - `gF` → `ew` (w as in window)
+  - `zf` → `ef` (f as in focus)
+  - `zF` → `eb` (b as in browser)
+  - `zv` → `av` (you actually select _all_ of the element’s text)
+
+  (`f`, `yf`, `af`, `v` and `yv` stay unchanged.)
+
+  There is a longer [explanation of these new defaults][hint-shortcuts] in the
+  documentation.
+
+- `zr` → `gC`. `zr` was the only shortcut starting with `z`. This frees that key
+  up for other uses.
+
+- `` ` `` → `'`. The `` ` `` shortcut (“scroll to mark”) as well as the `` ` ``
+  mark (“last position mark”) have both been changed to `'`. Both `` ` `` and
+  `'` are used in Vim. `'` is a better default, because it is easier to
+  type–both on an en-US QWERTY keyboard and, more importantly, on some
+  international layouts, such as the sv-SE QWERTY layout.
+
+  Note: If you miss Firefox’s default `'` shortcut to open the Quick Find bar
+  (which is now overridden), remember that VimFx provides `g/` which does the
+  same thing. (You can of course also change VimFx’s shortcuts.)
+
+See also issue [#788].
+
+[hint-shortcuts]: https://github.com/akhodakivskiy/VimFx/blob/e8d9df31dd5c8df999ac22e3b3b8d548a68c6fa7/documentation/commands.md#mnemonics-and-choice-of-default-hint-command-shortcuts
+[#788]: https://github.com/akhodakivskiy/VimFx/issues/788
+
+#### Other updates
+
+- Added: It is now possible to create [custom hint commands].
+- Fixed: The bottom-right corner of the page scrollbars can now be used with the
+  mouse again.
+- Fixed: The toolbar button now correctly toggles VimFx’s Keyboard Shortcuts
+  dialog again.
+- Updated locales: fr, ru. Thanks to Mickaël RAYBAUD-ROIG (@m-r-r) and Nicholas
+  Guriev (@mymedia2)!
+
+[custom hint commands]: https://github.com/akhodakivskiy/VimFx/blob/e8d9df31dd5c8df999ac22e3b3b8d548a68c6fa7/documentation/api.md#custom-hint-commands
+
 ### 0.17.4 (2016-07-11)
 
 - Improved: The usage of modifier keys in Hints mode is now shown in VimFx’s

@@ -61,8 +61,8 @@ set = (branch, key, value) ->
         branch.clearUserPref(key)
       else
         throw new Error(
-          "VimFx: Prefs may only be set to a boolean, number, string or null.
-           Got: #{typeof value}"
+          "VimFx: Options may only be set to a boolean, number, string or null.
+          Got: #{typeof value}"
         )
 
 has = (branch, key) ->
@@ -99,6 +99,7 @@ module.exports = {
     set: set.bind(null, branches.root.user)
     has: has.bind(null, branches.root.user)
     tmp: tmp.bind(null, branches.root.user)
+    observe: observe.bind(null, branches.root.user)
     default: {
       get: get.bind(null, branches.root.default)
       set: set.bind(null, branches.root.default)

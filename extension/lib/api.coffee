@@ -26,34 +26,44 @@ Vim = require('./vim')
 
 counter = new utils.Counter({start: 10000, step: 100})
 
-createConfigAPI = (vimfx) -> {
-  get: (pref) -> switch
-    when pref of defaults.parsed_options
-      vimfx.options[pref]
-    when pref of defaults.all_prefs or pref?.startsWith('custom.')
-      prefs.get(pref)
-    else
-      throw new Error("VimFx: Unknown pref: #{pref}")
+createConfigAPI = (vimfx, {allowDeprecated = true} = {}) -> {
+  get: (inputPref) ->
+    pref = alias(inputPref, allowDeprecated)
+    if pref != inputPref
+      try return prefs.get(inputPref)
+    return switch
+      when pref of defaults.parsed_options
+        vimfx.options[pref]
+      when pref of defaults.all_prefs or pref?.startsWith('custom.')
+        prefs.get(pref)
+      else
+        throw new Error("VimFx: Unknown option: #{pref}")
 
-  getDefault: (pref) -> switch
-    when pref of defaults.parsed_options or pref?.startsWith('custom.')
-      throw new Error("VimFx: No default for pref: #{pref}")
-    when pref of defaults.all_prefs
-      defaults.all_prefs[pref]
-    else
-      throw new Error("VimFx: Unknown pref: #{pref}")
+  getDefault: (inputPref) ->
+    pref = alias(inputPref, allowDeprecated)
+    if pref != inputPref
+      try return prefs.default.get(inputPref)
+    return switch
+      when pref of defaults.parsed_options or pref?.startsWith('custom.')
+        throw new Error("VimFx: No default for option: #{pref}")
+      when pref of defaults.all_prefs
+        defaults.all_prefs[pref]
+      else
+        throw new Error("VimFx: Unknown option: #{pref}")
 
-  set: (pref, value) -> switch
-    when pref of defaults.parsed_options
-      previousValue = vimfx.options[pref]
-      vimfx.options[pref] = value
-      onShutdown(vimfx, -> vimfx.options[pref] = previousValue)
-    when pref of defaults.all_prefs or pref?.startsWith('custom.')
-      previousValue = if prefs.has(pref) then prefs.get(pref) else null
-      prefs.set(pref, value)
-      onShutdown(vimfx, -> prefs.set(pref, previousValue))
-    else
-      throw new Error("VimFx: Unknown pref: #{pref}")
+  set: (inputPref, value) ->
+    pref = alias(inputPref, allowDeprecated)
+    switch
+      when pref of defaults.parsed_options
+        previousValue = vimfx.options[pref]
+        vimfx.options[pref] = value
+        onShutdown(vimfx, -> vimfx.options[pref] = previousValue)
+      when pref of defaults.all_prefs or pref?.startsWith('custom.')
+        previousValue = if prefs.has(pref) then prefs.get(pref) else null
+        prefs.set(pref, value)
+        onShutdown(vimfx, -> prefs.set(pref, previousValue))
+      else
+        throw new Error("VimFx: Unknown option: #{pref}")
 
   addCommand: ({name, description, mode, category, order} = {}, fn) ->
     mode ?= 'normal'
@@ -97,25 +107,43 @@ createConfigAPI = (vimfx) -> {
     onShutdown(vimfx, -> delete vimfx.modes[mode].commands[name])
 
   addOptionOverrides: (rules...) ->
+    validateRules(rules, (override) ->
+      unless Object::toString.call(override) == '[object Object]'
+        return 'an object'
+      return null
+    )
+
     unless vimfx.optionOverrides
       vimfx.optionOverrides = []
       vimfx.options = new Proxy(vimfx.options, {
         get: (options, pref) ->
           location = utils.getCurrentLocation()
-          overrides = getOverrides(vimfx.optionOverrides, location)
+          return options[pref] unless location
+          overrides = getOverrides(vimfx.optionOverrides ? [], location)
           return overrides?[pref] ? options[pref]
       })
-      onShutdown(vimfx, -> vimfx.optionOverrides = [])
+      onShutdown(vimfx, -> vimfx.optionOverrides = null)
+
     vimfx.optionOverrides.push(rules...)
 
   addKeyOverrides: (rules...) ->
+    validateRules(rules, (override) ->
+      unless Array.isArray(override) and
+             override.every((item) -> typeof item == 'string')
+        return 'an array of strings'
+      return null
+    )
+
     unless vimfx.keyOverrides
       vimfx.keyOverrides = []
       vimfx.options.keyValidator = (keyStr, mode) ->
+        return true unless mode == 'normal'
         location = utils.getCurrentLocation()
-        overrides = getOverrides(vimfx.keyOverrides, location, mode)
+        return true unless location
+        overrides = getOverrides(vimfx.keyOverrides ? [], location)
         return keyStr not in (overrides ? [])
-      onShutdown(vimfx, -> vimfx.keyOverrides = [])
+      onShutdown(vimfx, -> vimfx.keyOverrides = null)
+
     vimfx.keyOverrides.push(rules...)
 
   send: (vim, message, data = null, callback = null) ->
@@ -139,17 +167,81 @@ createConfigAPI = (vimfx) -> {
     vim._send(message, data, callback, {prefix: 'config:'})
 
   on: (event, listener) ->
+    validateEventListener(event, listener)
     vimfx.on(event, listener)
     onShutdown(vimfx, -> vimfx.off(event, listener))
 
-  off: vimfx.off.bind(vimfx)
+  off: (event, listener) ->
+    validateEventListener(event, listener)
+    vimfx.off(event, listener)
+
   modes: vimfx.modes
 }
 
+# Don’t crash the users’s entire config file on startup if they happen to try to
+# set a renamed pref (only warn), but do throw an error if they reload the
+# config file; then they could update while editing the file anyway.
+alias = (pref, allowDeprecated) ->
+  if pref of renamedPrefs
+    newPref = renamedPrefs[pref]
+    message = "VimFx: `#{pref}` has been renamed to `#{newPref}`."
+    if allowDeprecated
+      console.warn(message)
+      return newPref
+    else
+      throw new Error(message)
+  else
+    return pref
+
+renamedPrefs = {
+  'hint_chars': 'hints.chars'
+  'hints_sleep': 'hints.sleep'
+  'hints_timeout': 'hints.matched_timeout'
+  'hints_peek_through': 'hints.peek_through'
+  'hints_toggle_in_tab': 'hints.toggle_in_tab'
+  'hints_toggle_in_background': 'hints.toggle_in_background'
+  'mode.hints.delete_hint_char': 'mode.hints.delete_char'
+}
+
 getOverrides = (rules, args...) ->
-  for [match, overrides] in rules
-    return overrides if match(args...)
+  for [matcher, override] in rules
+    return override if matcher(args...)
   return null
+
+validateRules = (rules, overrideValidator) ->
+  for rule in rules
+    unless Array.isArray(rule)
+      throw new Error(
+        "VimFx: An override rule must be an array. Got: #{rule}"
+      )
+    unless rule.length == 2
+      throw new Error(
+        "VimFx: An override rule array must be of length 2. Got: #{rule.length}"
+      )
+    [matcher, override] = rule
+    unless typeof matcher == 'function'
+      throw new Error(
+        "VimFx: The first item of an override rule array must be a function.
+         Got: #{matcher}"
+      )
+    overrideValidationMessage = overrideValidator(override)
+    if overrideValidationMessage
+      throw new Error(
+        "VimFx: The second item of an override rule array must be
+         #{overrideValidationMessage}. Got: #{override}"
+      )
+  return
+
+validateEventListener = (event, listener) ->
+  unless typeof event == 'string'
+    throw new Error(
+      "VimFx: The first argument must be a string. Got: #{event}"
+    )
+  unless typeof listener == 'function'
+    throw new Error(
+      "VimFx: The second argument must be a function. Got: #{listener}"
+    )
+  return
 
 onShutdown = (vimfx, handler) ->
   fn = ->

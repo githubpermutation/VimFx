@@ -1,7 +1,5 @@
 ###
-# Copyright Anton Khodakivskiy 2013, 2014.
-# Copyright Simon Lydell 2013, 2014, 2015, 2016.
-# Copyright Wang Zhuochun 2014.
+# Copyright Simon Lydell 2014, 2015, 2016.
 #
 # This file is part of VimFx.
 #
@@ -25,13 +23,13 @@
 {commands, findStorage} = require('./commands')
 defaults = require('./defaults')
 help = require('./help')
+hintsMode = require('./hints-mode')
 prefs = require('./prefs')
 SelectionManager = require('./selection')
 translate = require('./translate')
 utils = require('./utils')
 
 {FORWARD, BACKWARD} = SelectionManager
-CARET_BROWSING_PREF = 'accessibility.browsewithcaret'
 
 # Helper to create modes in a DRY way.
 mode = (modeName, obj, commands = null) ->
@@ -52,25 +50,28 @@ mode = (modeName, obj, commands = null) ->
 
 
 mode('normal', {
-  onEnter: ({vim, storage}, options = {}) ->
-    if options.returnTo
-      storage.returnTo = options.returnTo
+  onEnter: ({vim, storage}, {returnTo = null} = {}) ->
+    if returnTo
+      storage.returnTo = returnTo
     else if storage.returnTo
-      vim.enterMode(storage.returnTo)
+      vim._enterMode(storage.returnTo)
       storage.returnTo = null
 
   onLeave: ({vim}) ->
     vim._run('clear_inputs')
 
   onInput: (args, match) ->
-    {vim, storage, uiEvent} = args
+    {vim, storage, event} = args
     {keyStr} = match
+    focusTypeBeforeCommand = vim.focusType
+
+    vim.hideNotification() if match.type in ['none', 'full']
 
     if match.type == 'none' or
        (match.likelyConflict and not match.specialKeys['<force>'])
       match.discard()
       if storage.returnTo
-        vim.enterMode(storage.returnTo)
+        vim._enterMode(storage.returnTo)
         storage.returnTo = null
       # If you press `aa` (and `a` is a prefix key, but there’s no `aa`
       # shortcut), don’t pass the second `a` to the page.
@@ -82,7 +83,7 @@ mode('normal', {
       # If the command changed the mode, wait until coming back from that mode
       # before switching to `storage.returnTo` if any (see `onEnter` above).
       if storage.returnTo and vim.mode == 'normal'
-        vim.enterMode(storage.returnTo)
+        vim._enterMode(storage.returnTo)
         storage.returnTo = null
 
     # At this point the match is either full, partial or part of a count. Then
@@ -92,18 +93,19 @@ mode('normal', {
     # Passing Escape through allows for stopping the loading of the page and
     # closing many custom dialogs (and perhaps other things; Escape is a very
     # commonly used key).
-    if uiEvent
+    if vim.isUIEvent(event)
       # In browser UI the biggest reasons are allowing to reset the location bar
       # when blurring it, and closing dialogs such as the “bookmark this page”
       # dialog (<c-d>). However, an exception is made for the devtools (<c-K>).
       # There, trying to unfocus the devtools using Escape would annoyingly
       # open the split console.
-      return utils.isDevtoolsElement(uiEvent.originalTarget)
+      return utils.isDevtoolsElement(event.originalTarget)
     else
-      # In web pages content, an exception is made if an element that VimFx
+      # In web page content, an exception is made if an element that VimFx
       # cares about is focused. That allows for blurring an input in a custom
-      # dialog without closing the dialog too.
-      return vim.focusType != 'none'
+      # dialog without closing the dialog too. Note that running a command might
+      # change `vim.focusType`, which is why this saved value is used here.
+      return focusTypeBeforeCommand != 'none'
 
     # Note that this special handling of Escape is only used in Normal mode.
     # There are two reasons we might suppress it in other modes. If some custom
@@ -122,31 +124,37 @@ helper_move_caret = (method, direction, {vim, storage, count = 1}) ->
   })
 
 mode('caret', {
-  onEnter: ({vim, storage}, select = false) ->
+  onEnter: ({vim, storage}, {select = false} = {}) ->
     storage.select = select
-    storage.caretBrowsingPref = prefs.root.get(CARET_BROWSING_PREF)
-    prefs.root.set(CARET_BROWSING_PREF, true)
+    vim._parent.resetCaretBrowsing(true)
     vim._run('enable_caret')
 
     listener = ->
       return unless newVim = vim._parent.getCurrentVim(vim.window)
-      prefs.root.set(
-        CARET_BROWSING_PREF,
-        if newVim.mode == 'caret' then true else storage.caretBrowsingPref
+      vim._parent.resetCaretBrowsing(
+        if newVim.mode == 'caret' then true else null
       )
     vim._parent.on('TabSelect', listener)
     storage.removeListener = -> vim._parent.off('TabSelect', listener)
 
   onLeave: ({vim, storage}) ->
-    prefs.root.set(CARET_BROWSING_PREF, storage.caretBrowsingPref)
+    vim._parent.resetCaretBrowsing()
     vim._run('clear_selection')
     storage.removeListener?()
     storage.removeListener = null
 
   onInput: (args, match) ->
-    if match.type == 'full'
-      match.command.run(args)
-      return true
+    args.vim.hideNotification()
+
+    # In case the user turns Caret Browsing off while in Caret mode.
+    args.vim._parent.resetCaretBrowsing(true)
+
+    switch match.type
+      when 'full'
+        match.command.run(args)
+        return true
+      when 'partial', 'count'
+        return true
     return false
 
 }, {
@@ -182,21 +190,31 @@ mode('caret', {
         # clipboard, since `window.getSelection().toString()` sadly collapses
         # whitespace in `<pre>` elements.
         vim.window.goDoCommand('cmd_copy')
-        vim.enterMode('normal')
+        vim._enterMode('normal')
     )
 
   exit: ({vim}) ->
-    vim.enterMode('normal')
+    vim._enterMode('normal')
 })
 
 
 
 mode('hints', {
   onEnter: ({vim, storage}, options) ->
-    {markerContainer, callback, count = 1, sleep = -1} = options
+    {
+      markerContainer, callback, matchText = true, count = 1, sleep = -1
+    } = options
     storage.markerContainer = markerContainer
     storage.callback = callback
+    storage.matchText = matchText
     storage.count = count
+    storage.isMatched = {byText: false, byHint: false}
+    storage.skipOnLeaveCleanup = false
+
+    if matchText
+      markerContainer.visualFeedbackUpdater =
+        hintsMode.updateVisualFeedback.bind(null, vim)
+      vim._run('clear_selection')
 
     if sleep >= 0
       storage.clearInterval = utils.interval(vim.window, sleep, (next) ->
@@ -211,46 +229,55 @@ mode('hints', {
       )
 
   onLeave: ({vim, storage}) ->
-    {markerContainer} = storage
-    vim.window.setTimeout(
-      (-> markerContainer.remove()),
-      vim.options.hints_timeout
-    )
-    storage.clearInterval?()
-    for key of storage
-      storage[key] = null
-    return
+    hintsMode.cleanup(vim, storage) unless storage.skipOnLeaveCleanup
 
   onInput: (args, match) ->
     {vim, storage} = args
     {markerContainer, callback} = storage
 
-    if match.type == 'full'
-      match.command.run(args)
-    else if match.unmodifiedKey in vim.options.hint_chars
-      matchedMarkers = markerContainer.matchHintChar(match.unmodifiedKey)
-      if matchedMarkers.length > 0
-        again = callback(matchedMarkers[0], storage.count, match.keyStr)
-        storage.count -= 1
-        if again
-          vim.window.setTimeout((->
-            marker.markMatched(false) for marker in matchedMarkers
-            return
-          ), vim.options.hints_timeout)
-          markerContainer.reset()
-        else
-          # The callback might have entered another mode. Only go back to Normal
-          # mode if we’re still in Hints mode.
-          vim.enterMode('normal') if vim.mode == 'hints'
+    switch match.type
+      when 'full'
+        match.command.run(Object.assign({match}, args))
+
+      when 'none', 'count'
+        # Make sure notifications for counts aren’t shown.
+        vim._refreshPersistentNotification()
+
+        {char, isHintChar} = hintsMode.getChar(match, storage)
+        return true unless char
+
+        return true if storage.isMatched.byText and not isHintChar
+
+        visibleMarkers = markerContainer.addChar(char, isHintChar)
+        storage.isMatched = hintsMode.isMatched(visibleMarkers, markerContainer)
+
+        if (storage.isMatched.byHint and isHintChar) or
+           (storage.isMatched.byText and not isHintChar and
+            vim.options['hints.auto_activate'])
+          hintsMode.activateMatch(
+            vim, storage, match, visibleMarkers, callback
+          )
+
+          unless isHintChar
+            vim._parent.ignoreKeyEventsUntilTime =
+              Date.now() + vim.options['hints.timeout']
 
     return true
 
 }, {
-  exit: ({vim, storage}) ->
-    # The hints are removed automatically when leaving the mode, but after a
-    # timeout. When aborting the mode we should remove the hints immediately.
-    storage.markerContainer.remove()
-    vim.enterMode('normal')
+  exit: ({vim}) ->
+    vim._enterMode('normal')
+
+  activate_highlighted: ({vim, storage, match}) ->
+    {markerContainer: {markers, highlightedMarkers}, callback} = storage
+    return if highlightedMarkers.length == 0
+
+    for marker in markers when marker.visible
+      marker.hide() unless marker in highlightedMarkers
+
+    hintsMode.activateMatch(
+      vim, storage, match, highlightedMarkers, callback
+    )
 
   rotate_markers_forward: ({storage}) ->
     storage.markerContainer.rotateOverlapping(true)
@@ -258,11 +285,16 @@ mode('hints', {
   rotate_markers_backward: ({storage}) ->
     storage.markerContainer.rotateOverlapping(false)
 
-  delete_hint_char: ({storage}) ->
-    storage.markerContainer.deleteHintChar()
+  delete_char: ({storage}) ->
+    {markerContainer} = storage
+    visibleMarkers = markerContainer.deleteChar()
+    storage.isMatched =
+      hintsMode.isMatched(visibleMarkers or [], markerContainer)
 
   increase_count: ({storage}) ->
     storage.count += 1
+    # Uncomment this line if you want to use `gulp hints.html`!
+    # utils.writeToClipboard(storage.markerContainer.container.outerHTML)
 
   toggle_complementary: ({storage}) ->
     storage.markerContainer.toggleComplementary()
@@ -288,23 +320,35 @@ mode('ignore', {
   onInput: (args, match) ->
     {vim, storage} = args
     args.count = 1
+
     switch storage.count
       when null
-        if match.type == 'full'
-          match.command.run(args)
-          return true
+        switch match.type
+          when 'full'
+            match.command.run(args)
+            return true
+          when 'partial'
+            return true
+
+        # Make sure notifications for counts aren’t shown.
+        vim.hideNotification()
+        return false
+
       when 1
-        vim.enterMode('normal')
+        vim._enterMode('normal')
+
       else
         storage.count -= 1
+
     return false
 
 }, {
   exit: ({vim, storage}) ->
     storage.type = null
-    vim.enterMode('normal')
+    vim._enterMode('normal')
+
   unquote: ({vim}) ->
-    vim.enterMode('normal', {returnTo: 'ignore'})
+    vim._enterMode('normal', {returnTo: 'ignore'})
 })
 
 
@@ -315,17 +359,34 @@ mode('find', {
   onLeave: ({vim}) ->
     findBar = vim.window.gBrowser.getFindBar()
     findStorage.lastSearchString = findBar._findField.value
+    findStorage.busy = false
 
   onInput: (args, match) ->
-    args.findBar = args.vim.window.gBrowser.getFindBar()
-    if match.type == 'full'
-      match.command.run(args)
-      return true
-    return false
+    {vim} = args
+    switch
+      when match.type == 'full'
+        args.findBar = args.vim.window.gBrowser.getFindBar()
+        match.command.run(args)
+        return true
+      when match.type == 'partial'
+        return true
+      when vim.focusType != 'findbar'
+        # If we’re in Find mode but the find bar input hasn’t been focused yet,
+        # suppress all input, because we don’t want to trigger Firefox commands,
+        # such as `/` (which opens the Quick Find bar). This happens when
+        # `helper_find_from_top_of_viewport` is slow, or when _Firefox_ is slow,
+        # for example to due to heavy page loading. The following URL is a good
+        # stress test: <https://html.spec.whatwg.org/>
+        findStorage.busy = true
+        return true
+      else
+        # At this point we know for sure that the find bar is not busy anymore.
+        findStorage.busy = false
+        return false
 
 }, {
   exit: ({vim, findBar}) ->
-    vim.enterMode('normal')
+    vim._enterMode('normal')
     findBar.close()
 })
 
@@ -336,7 +397,7 @@ mode('marks', {
     storage.callback = callback
     storage.timeoutId = vim.window.setTimeout((->
       vim.hideNotification()
-      vim.enterMode('normal')
+      vim._enterMode('normal')
     ), vim.options.timeout)
 
   onLeave: ({vim, storage}) ->
@@ -346,13 +407,16 @@ mode('marks', {
 
   onInput: (args, match) ->
     {vim, storage} = args
-    if match.type == 'full'
-      match.command.run(args)
-    else
-      storage.callback(match.keyStr)
-      vim.enterMode('normal')
+    switch match.type
+      when 'full'
+        match.command.run(args)
+      when 'none', 'count'
+        storage.callback(match.keyStr)
+        vim._enterMode('normal')
     return true
+
 }, {
   exit: ({vim}) ->
-    vim.enterMode('normal')
+    vim.hideNotification()
+    vim._enterMode('normal')
 })

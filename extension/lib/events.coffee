@@ -45,8 +45,6 @@ class UIEventManager
     # keyboard input, allowing accesskeys to be used.
     @popupPassthrough = false
 
-    @enteredKeys = new EnteredKeysManager(@window)
-
   addListeners: ->
     checkPassthrough = (value, event) =>
       target = event.originalTarget
@@ -109,6 +107,8 @@ class UIEventManager
       target = event.originalTarget
       return unless vim = @vimfx.getCurrentVim(@window)
 
+      vim.hideNotification()
+
       # In multi-process, clicks simulated by VimFx cannot be caught here. In
       # non-multi-process, they unfortunately can. This hack should be
       # sufficient for that case until non-multi-process is removed from
@@ -128,7 +128,7 @@ class UIEventManager
          # mode. Otherwise we’d first return to normal mode and then the button
          # would open the help dialog.
          target != button.getButton(@window)
-        vim.enterMode('normal')
+        vim._enterMode('normal')
 
       vim._send('clearHover') unless isVimFxGeneratedEvent
     )
@@ -199,20 +199,16 @@ class UIEventManager
     vim._setFocusType(focusType)
 
     if focusType == 'editable' and vim.mode == 'caret'
-      vim.enterMode('normal')
+      vim._enterMode('normal')
 
   consumeKeyEvent: (vim, event) ->
     match = vim._consumeKeyEvent(event)
 
-    if match
-      if @vimfx.options.notify_entered_keys and vim.mode != 'ignore'
-        if match.type in ['none', 'full'] or match.likelyConflict
-          @enteredKeys.clear(vim)
-        else
-          @enteredKeys.push(vim, match.keyStr, @vimfx.options.timeout)
-      else
-        vim.hideNotification()
+    if typeof match == 'boolean'
+      @suppress = match
+      return
 
+    if match
       if match.specialKeys['<late>']
         @suppress = false
         @consumeLateKeydown(vim, event, match)
@@ -268,7 +264,7 @@ class UIEventManager
 
   anyPopupsOpen: ->
     # The autocomplete popup in text inputs (for example) is technically a
-    # panel, but it does not respond to key presses. Therefore
+    # panel, but it does not respond to keypresses. Therefore
     # `[ignorekeys="true"]` is excluded.
     #
     # coffeelint: disable=max_line_length
@@ -280,26 +276,5 @@ class UIEventManager
     for popup in popups
       return true if popup.state == 'open'
     return false
-
-class EnteredKeysManager
-  constructor: (@window) ->
-    @keys = []
-    @timeout = null
-
-  clear: (notifier) ->
-    @keys = []
-    @clearTimeout()
-    notifier.hideNotification()
-
-  push: (notifier, keyStr, duration) ->
-    @keys.push(keyStr)
-    @clearTimeout()
-    notifier.notify(@keys.join(''))
-    clear = @clear.bind(this)
-    @timeout = @window.setTimeout((-> clear(notifier)), duration)
-
-  clearTimeout: ->
-    @window.clearTimeout(@timeout) if @timeout?
-    @timeout = null
 
 module.exports = UIEventManager

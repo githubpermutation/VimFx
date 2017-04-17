@@ -1,5 +1,5 @@
 ###
-# Copyright Simon Lydell 2015, 2016.
+# Copyright Simon Lydell 2015, 2016, 2017.
 #
 # This file is part of VimFx.
 #
@@ -48,9 +48,16 @@ createComplementarySelectors = (selectors) ->
   ]
 
 FOLLOW_DEFAULT_SELECTORS = createComplementarySelectors([
-  'a', 'button', 'input', 'textarea', 'select'
+  'a', 'button', 'input', 'textarea', 'select', 'label'
   '[role]', '[contenteditable]'
 ])
+
+FOLLOW_CONTEXT_TAGS = [
+  'a', 'button', 'input', 'textarea', 'select'
+  'img', 'audio', 'video', 'canvas', 'embed', 'object'
+]
+
+FOLLOW_CONTEXT_SELECTORS = createComplementarySelectors(FOLLOW_CONTEXT_TAGS)
 
 FOLLOW_SELECTABLE_SELECTORS =
   createComplementarySelectors(['div', 'span']).reverse()
@@ -75,38 +82,81 @@ commands.go_to_root = ({vim}) ->
 commands.scroll = (args) ->
   {vim} = args
   return unless activeElement = utils.getActiveElement(vim.content)
+
+  # If the active element, or one of its parents, is scrollable, use that
+  # element.
+  scrollElement = activeElement
+  until vim.state.scrollableElements.has(scrollElement) or
+        not scrollElement.parentNode
+    scrollElement = scrollElement.parentNode
+
   element =
     # If no element is focused on the page, the active element is the topmost
     # `<body>`, and blurring it is a no-op. If it is scrollable, it means that
     # you can’t blur it in order to scroll `<html>`. Therefore it may only be
     # scrolled if it has been explicitly focused.
-    if vim.state.scrollableElements.has(activeElement) and
-       (activeElement != vim.content.document.body or
+    if vim.state.scrollableElements.has(scrollElement) and
+       (scrollElement != vim.content.document.body or
         vim.state.explicitBodyFocus)
-      activeElement
+      scrollElement
     else
       vim.state.scrollableElements.filterSuitableDefault()
   viewportUtils.scroll(element, args)
 
-commands.mark_scroll_position = ({vim, keyStr, notify = true}) ->
-  element = vim.state.scrollableElements.filterSuitableDefault()
-  vim.state.marks[keyStr] =
-    if element.ownerDocument.documentElement.localName == 'svg'
-      [element.ownerGlobal.scrollY, element.ownerGlobal.scrollX]
-    else
-      [element.scrollTop, element.scrollLeft]
+commands.mark_scroll_position = (args) ->
+  {vim, keyStr, notify = true, addToJumpList = false} = args
+
+  vim.state.marks[keyStr] = vim.state.scrollableElements.getPageScrollPosition()
+
+  if addToJumpList
+    vim.addToJumpList()
+
   if notify
     vim.notify(translate('notification.mark_scroll_position.success', keyStr))
 
 commands.scroll_to_mark = (args) ->
-  {vim, amounts: keyStr} = args
+  {vim, extra: {keyStr, lastPositionMark}} = args
+
   unless keyStr of vim.state.marks
     vim.notify(translate('notification.scroll_to_mark.none', keyStr))
     return
 
   args.amounts = vim.state.marks[keyStr]
   element = vim.state.scrollableElements.filterSuitableDefault()
+
+  commands.mark_scroll_position({
+    vim
+    keyStr: lastPositionMark
+    notify: false
+    addToJumpList: true
+  })
   viewportUtils.scroll(element, args)
+
+commands.scroll_to_position = (args) ->
+  {vim, extra: {count, direction, lastPositionMark}} = args
+
+  if direction == 'previous' and vim.state.jumpListIndex >= 0 and
+     vim.state.jumpListIndex == vim.state.jumpList.length - 1
+    vim.addToJumpList()
+
+  {jumpList, jumpListIndex} = vim.state
+  maxIndex = jumpList.length - 1
+
+  if (direction == 'previous' and jumpListIndex <= 0) or
+     (direction == 'next' and jumpListIndex >= maxIndex)
+    vim.notify(translate("notification.scroll_to_#{direction}_position.limit"))
+    return
+
+  index = jumpListIndex + count * (if direction == 'previous' then -1 else +1)
+  index = Math.max(index, 0)
+  index = Math.min(index, maxIndex)
+
+  args.amounts = jumpList[index]
+  element = vim.state.scrollableElements.filterSuitableDefault()
+
+  commands.mark_scroll_position({vim, keyStr: lastPositionMark, notify: false})
+  viewportUtils.scroll(element, args)
+  vim.state.jumpListIndex = index
 
 helper_follow = (options, matcher, {vim, pass}) ->
   {id, combine = true, selectors = FOLLOW_DEFAULT_SELECTORS} = options
@@ -138,7 +188,7 @@ helper_follow = (options, matcher, {vim, pass}) ->
         rect = element.getBoundingClientRect()
         # Use `.clientWidth` instead of `rect.width` because the latter includes
         # the width of the borders of the textarea, which are unreliable.
-        if element.clientWidth == 1 and rect.height > 0
+        if element.clientWidth <= 1 and rect.height > 0
           shape = {
             nonCoveredPoint: {
               x: rect.left
@@ -161,9 +211,16 @@ helper_follow = (options, matcher, {vim, pass}) ->
 
     return unless shape.nonCoveredPoint
 
+    text = utils.getText(element)
+
     originalRect = element.getBoundingClientRect()
     length = vim.state.markerElements.push({element, originalRect})
-    wrapper = {type, shape, elementIndex: length - 1}
+    wrapper = {
+      type, text, shape,
+      combinedArea: shape.area
+      elementIndex: length - 1
+      parentIndex: null
+    }
 
     if wrapper.type == 'link'
       {href} = element
@@ -182,10 +239,9 @@ helper_follow = (options, matcher, {vim, pass}) ->
         if href of hrefs
           parent = hrefs[href]
           wrapper.parentIndex = parent.elementIndex
-          parent.shape.area += wrapper.shape.area
+          parent.combinedArea += wrapper.shape.area
           parent.numChildren += 1
         else
-          wrapper.numChildren = 0
           hrefs[href] = wrapper
 
     return wrapper
@@ -317,7 +373,7 @@ commands.follow_focus = helper_follow.bind(
   null, {id: 'focus', combine: false},
   ({vim, element}) ->
     type = switch
-      when element.tabIndex > -1
+      when utils.isFocusable(element)
         'focusable'
       when element != vim.state.scrollableElements.largest and
            vim.state.scrollableElements.has(element)
@@ -327,31 +383,39 @@ commands.follow_focus = helper_follow.bind(
     return type
 )
 
+commands.follow_context = helper_follow.bind(
+  null, {id: 'context', selectors: FOLLOW_CONTEXT_SELECTORS},
+  ({element}) ->
+    type =
+      if element.localName in FOLLOW_CONTEXT_TAGS or
+         utils.hasMarkableTextNode(element)
+        'context'
+      else
+        null
+    return type
+)
+
 commands.follow_selectable = helper_follow.bind(
   null, {id: 'selectable', selectors: FOLLOW_SELECTABLE_SELECTORS},
   ({element}) ->
-    isRelevantTextNode = (node) ->
-      # Ignore whitespace-only text nodes, and single-letter ones (which are
-      # common in many syntax highlighters).
-      return node.nodeType == 3 and node.data.trim().length > 1
     type =
-      if Array.some(element.childNodes, isRelevantTextNode)
+      if utils.hasMarkableTextNode(element)
         'selectable'
       else
         null
     return type
 )
 
-commands.focus_marker_element = ({vim, elementIndex, options}) ->
+commands.focus_marker_element = ({vim, elementIndex, browserOffset, options}) ->
   {element} = vim.state.markerElements[elementIndex]
   # To be able to focus scrollable elements, `FLAG_BYKEY` _has_ to be used.
   options.flag = 'FLAG_BYKEY' if vim.state.scrollableElements.has(element)
   utils.focusElement(element, options)
   vim.clearHover()
-  vim.setHover(element)
+  vim.setHover(element, browserOffset)
 
 commands.click_marker_element = (
-  {vim, elementIndex, type, preventTargetBlank}
+  {vim, elementIndex, type, browserOffset, preventTargetBlank}
 ) ->
   {element} = vim.state.markerElements[elementIndex]
   if element.target == '_blank' and preventTargetBlank
@@ -361,12 +425,14 @@ commands.click_marker_element = (
     element.click()
   else
     isXUL = (element.ownerDocument instanceof XULDocument)
-    sequence =
-      if isXUL
+    sequence = switch
+      when isXUL
         if element.localName == 'tab' then ['mousedown'] else 'click-xul'
+      when type == 'context'
+        'context'
       else
         'click'
-    utils.simulateMouseEvents(element, sequence)
+    utils.simulateMouseEvents(element, sequence, browserOffset)
     utils.openDropdown(element)
   element.target = targetReset if targetReset
 
@@ -414,10 +480,27 @@ commands.element_text_select = ({vim, elementIndex, full, scroll = false}) ->
       range.setEndBefore(element)
 
   utils.clearSelectionDeep(vim.content)
+
+  # Focus the window so that the selection does not appear greyed out. However,
+  # if a text input was previously focused in that window (frame), that will
+  # cause the text input to be re-focused, so make sure to blur the active
+  # element, so that the caret does not end up there.
   window.focus()
+  window.document.activeElement?.blur?()
+
   selection.addRange(range)
 
-commands.follow_pattern = ({vim, type, options}) ->
+  if full
+    # Force the selected text to appear in the “selection clipboard”. Note:
+    # `selection.modify` would not make any difference here. That makes sense,
+    # since web pages that programmatically change the selection shouldn’t
+    # affect the user’s clipboard. `SelectionManager` uses an internal Firefox
+    # API with clipboard privileges.
+    selectionManager = new SelectionManager(window)
+    error = selectionManager.moveCaret('characterMove', BACKWARD)
+    selectionManager.moveCaret('characterMove', FORWARD) unless error
+
+commands.follow_pattern = ({vim, type, browserOffset, options}) ->
   {document} = vim.content
 
   # If there’s a `<link rel=prev/next>` element we use that.
@@ -443,6 +526,10 @@ commands.follow_pattern = ({vim, type, options}) ->
   attrs = options.pattern_attrs
 
   matchingLink = do ->
+    # Special-case for Google searches.
+    googleLink = document.getElementById("pn#{type}")
+    return googleLink if googleLink
+
     # First search in attributes (favoring earlier attributes) as it's likely
     # that they are more specific than text contexts.
     for attr in attrs
@@ -458,7 +545,7 @@ commands.follow_pattern = ({vim, type, options}) ->
     return null
 
   if matchingLink
-    utils.simulateMouseEvents(matchingLink, 'click')
+    utils.simulateMouseEvents(matchingLink, 'click', browserOffset)
     # When you go to the next page of GitHub’s code search results, the page is
     # loaded with AJAX. GitHub then annoyingly focuses its search input. This
     # autofocus cannot be prevented in a reliable way, because the case is
@@ -618,7 +705,10 @@ commands.collapse_selection = ({vim}) ->
   return unless selectionManager = helper_create_selection_manager(vim)
   selectionManager.collapse()
 
-commands.clear_selection = ({vim}) ->
-  utils.clearSelectionDeep(vim.content)
+commands.clear_selection = ({vim, blur}) ->
+  utils.clearSelectionDeep(vim.content, {blur})
+
+commands.modal = ({vim, type, args}) ->
+  return vim.content[type](args...)
 
 module.exports = commands

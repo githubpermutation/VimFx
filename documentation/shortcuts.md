@@ -6,19 +6,24 @@ See the file README.md for copying conditions.
 
 # Shortcuts
 
-All of VimFx’s keyboard shortcuts can be customized in VimFx’s settings page in
+All of VimFx’s keyboard shortcuts can be customized in VimFx’s options page in
 the Add-ons Manager. Doing so is really easy. You get far just by looking at the
 defaults and trying things out. If not, read on.
 
 In VimFx’s Keyboard Shortcuts help dialog (which can be opened by pressing `?`)
-you can click any command to open VimFx’s settings page in the Add-ons Manager
-and automatically select the text input for that command. Tip: Use the `zF`
+you can click any command to open VimFx’s options page in the Add-ons Manager
+and automatically select the text input for that command. Tip: Use the `eb`
 command to click without using the mouse.
 
 Shortcuts tell which keys to press to activate a command. A command may have
 several different shortcuts. Read about [modes] for more information.
 
+This file documents how the shortcuts work in general, not the [default
+shortcuts] or details on what the [_command_][commands] for a shortcut does.
+
 [modes]: modes.md
+[default shortcuts]: https://github.com/akhodakivskiy/VimFx/blob/master/extension/lib/defaults.coffee
+[commands]: commands.md
 
 
 ## Key notation
@@ -26,7 +31,7 @@ several different shortcuts. Read about [modes] for more information.
 VimFx’s key notation is inspired by Vim’s key notation.
 
 Here is an example of what you can type into a text input for a command in
-VimFx’s settings page in the Add-ons Manager:
+VimFx’s options page in the Add-ons Manager:
 
     J  <c-s-tab>  <c-j>  gT  g<left>
 
@@ -37,17 +42,35 @@ be put inside `<` and `>`. If you want to specify a modifier, then letters need
 to be put inside `<` and `>` as well (as in the `<c-j>` example, which might be
 notated as “CTRL+J” in some other programs.)
 
-If you’re usure on how to express a key press you’d like to use as part of a
-shortcut, press `<c-q>` while inside one of the text inputs for a command and
-then press your desired key (optionally holding modifier keys). That will paste
-the key notation for that particular key press into the text input. `<c-d>`
-pastes the default shortcut(s), and `<c-r>` resets the text input to the default
-entirely. You can of course use the standard `<c-z>` to undo.
-
 You can specify any number of shortcuts for every command. Separate them from
 each other by one or more spaces.
 
-Here is a more formal description of all of the above:
+### Helper keyboard shortcuts
+
+When you have focused the text input for one of all commands, there are a few
+handy keyboard shortcuts that help you with editing your shortcuts:
+
+- `<c-q>`: Use this when you’re unsure on how to express a keypress you’d like
+  to use as part of a shortcut. First, press `<c-q>`. Then, press your desired
+  key (optionally holding modifier keys). That will paste the key notation for
+  that particular keypress into the text input. For example: First press
+  `<c-q>`. Then hold down ctrl and press `[`. That results in `<c-[>` being
+  inserted into the text input.
+
+- `<c-d>`: Pastes the default shortcut(s) into the text input.
+
+- `<c-r>`: Resets the text input to the default entirely.
+
+- `<c-z>`: Undo. (This is simply the standard undo feature of your operating
+  system. It’s just mentioned because it is easy to forget that it can actually
+  be used here.)
+
+(`<c-d>`, `<c-r>` and `<c-z>` also work in other VimFx setting inputs, such as
+the [“Previous”/“Next” link patterns].)
+
+[“Previous”/“Next” link patterns]: options.md#previousnext-link-patterns
+
+### A bit more formal description
 
 A _shortcut_ consists of one or more _keys_ that you need to press in order to
 activate the command. (See also the [timeout] option.)
@@ -76,7 +99,7 @@ keyboard layout] option.
 
 If you’d like see what VimFx interprets a key stroke as, you can (ab)use the
 [`m`] command. Press `m` followed by your desired key stroke. A [notification]
-will appear, including the interpreted key notation for that key press.
+will appear, including the interpreted key notation for that keypress.
 
 [Ignore keyboard layout]: options.md#ignore-keyboard-layout
 [`m`]: commands.md#marks-m-and-
@@ -128,10 +151,10 @@ mode.”
 ### `<late>`
 
 The `<late>` special key makes the shortcut in question run _after_ the handling
-of key presses in the current page, allowing the current page to override it.
+of keypresses in the current page, allowing the current page to override it.
 
 Normally, all of VimFx’s shortcuts are triggered _before_ the current page gets
-the key presses. This makes the VimFx shortcuts work consistently regardless of
+the keypresses. This makes the VimFx shortcuts work consistently regardless of
 what the current page happens to be up to.
 
 Sometimes, though, it is useful to let the page override a shortcut. For

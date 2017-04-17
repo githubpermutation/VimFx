@@ -17,7 +17,7 @@
  * along with VimFx.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* Allow file:/// prefix for testing using `gulp help.html`. */
+/* Allow file:/// prefix for testing using `gulp {help,hints}.html`. */
 @-moz-document url(chrome://browser/content/browser.xul), url-prefix(file:///)
 {
 
@@ -78,8 +78,9 @@ toolbarpaletteitem[place="palette"] > #VimFxButton {
 /***** Markers *****/
 
 #VimFxMarkersContainer {
-  position: absolute;
+  position: relative;
   pointer-events: none;
+  font: menu;
 }
 
   #VimFxMarkersContainer.ui {
@@ -96,39 +97,47 @@ toolbarpaletteitem[place="palette"] > #VimFxButton {
   position: absolute;
   --padding: 0.2em;
   padding: var(--padding);
-  --border-color: #ad810c;
+  --border-color: rgba(0, 0, 0, 0.4);
   --border-width: 1px;
   border: solid var(--border-width) var(--border-color);
   background-color: #ffd76e;
-  color: #302505;
-  font: menu;
+  color: black;
+  font-size: 0.8em;
   line-height: 1;
   font-weight: bold;
-  text-transform: uppercase;
   white-space: nowrap;
   /* Some light-weight themes set a `text-shadow` that the hint markers inherit,
    * making them almost unreadable. */
   text-shadow: none;
 }
 
+#VimFxMarkersContainer:not(.has-mixedcase) .marker {
+  text-transform: uppercase;
+}
+
 #VimFxMarkersContainer .marker-char {} /* Keep as documentation. */
 
 #VimFxMarkersContainer .marker--matched,
 #VimFxMarkersContainer .marker-char--matched {
-  color: #ffa22a;
+  color: rgba(0, 0, 0, 0.3);
+}
+
+#VimFxMarkersContainer .marker--highlighted {
+  background-color: lime;
 }
 
 #VimFxMarkersContainer .marker--hidden {
   display: none;
 }
 
-/* alt, ctrl and meta can also be targeted. */
-#main-window[vimfx-held-modifiers~="shift"] #VimFxMarkersContainer {
+/* alt, ctrl, meta and shift can be targeted. */
+#main-window[vimfx-held-modifiers~="ctrl"][vimfx-held-modifiers~="shift"]
+    #VimFxMarkersContainer {
   opacity: 0.2;
 }
 
 #VimFxMarkersContainer .marker[data-type="scrollable"] {
-  --width: 1px;
+  --width: 0.17em;
   padding-right: calc(var(--padding) + var(--border-width) + var(--width));
 }
 
@@ -154,7 +163,7 @@ toolbarpaletteitem[place="palette"] > #VimFxButton {
 /***** Help Dialog *****/
 
 #VimFxHelpDialogContainer {
-  position: absolute;
+  position: relative;
 
   opacity: 0.92;
   background-color: Window;

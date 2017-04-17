@@ -57,7 +57,9 @@ shortcuts =
       '0  ^':      'scroll_to_left'
       '$':         'scroll_to_right'
       'm':         'mark_scroll_position'
-      '`':         'scroll_to_mark'
+      "'":         'scroll_to_mark'
+      'g[':        'scroll_to_previous_position'
+      'g]':        'scroll_to_next_position'
 
     'tabs':
       't':         'tab_new'
@@ -83,17 +85,19 @@ shortcuts =
     'browsing':
       'f':         'follow'
       'F':         'follow_in_tab'
-      'gf':        'follow_in_focused_tab'
-      'gF':        'follow_in_window'
+      'et':        'follow_in_focused_tab'
+      'ew':        'follow_in_window'
+      'ep':        'follow_in_private_window'
       'af':        'follow_multiple'
       'yf':        'follow_copy'
-      'zf':        'follow_focus'
-      'zF':        'click_browser_element'
+      'ef':        'follow_focus'
+      'ec':        'open_context_menu'
+      'eb':        'click_browser_element'
       '[':         'follow_previous'
       ']':         'follow_next'
       'gi':        'focus_text_input'
       'v':         'element_text_caret'
-      'zv':        'element_text_select'
+      'av':        'element_text_select'
       'yv':        'element_text_copy'
 
     'find':
@@ -109,7 +113,8 @@ shortcuts =
       'i':         'enter_mode_ignore'
       'I':         'quote'
       'gr':        'enter_reader_view'
-      'zr':        'reload_config_file'
+      'gB':        'edit_blacklist'
+      'gC':        'reload_config_file'
       '?':         'help'
       ':':         'dev'
       '<force><escape>': 'esc'
@@ -132,11 +137,14 @@ shortcuts =
   'hints':
     '':
       '<escape>':        'exit'
-      '<space>':         'rotate_markers_forward'
+      '<enter>    \
+       <c-enter>    \
+       <a-enter>':       'activate_highlighted'
+      '<c-space>':       'rotate_markers_forward'
       '<s-space>':       'rotate_markers_backward'
-      '<backspace>':     'delete_hint_char'
-      '<enter>':         'increase_count'
-      '<c-enter>':       'toggle_complementary'
+      '<backspace>':     'delete_char'
+      '<c-backspace>':   'toggle_complementary'
+      '<up>':            'increase_count'
 
   'ignore':
     '':
@@ -152,13 +160,15 @@ shortcuts =
       '<escape> ':       'exit'
 
 options =
-  'hint_chars':             'fjdkslaghrueiwonc mv'
-  'prev_patterns':          'prev  previous  ‹  «  ◀  ←  <<  <  back  newer'
-  'next_patterns':          'next  ›  »  ▶  →  >>  >  more  older'
-  'blacklist':              '*example.com*  http://example.org/editor/*'
   'prevent_autofocus':      false
   'ignore_keyboard_layout': false
+  'blacklist':              '*example.com*  http://example.org/editor/*'
+  'hints.chars':            'fjdkslaghrueiwonc mv'
+  'hints.auto_activate':    true
+  'hints.timeout':          400
   'timeout':                2000
+  'prev_patterns':          'prev  previous  ‹  «  ◀  ←  <<  <  back  newer'
+  'next_patterns':          'next  ›  »  ▶  →  >>  >  more  older'
 
 advanced_options =
   'notifications_enabled':              true
@@ -166,26 +176,33 @@ advanced_options =
   'prevent_target_blank':               true
   'counts_enabled':                     true
   'find_from_top_of_viewport':          true
+  'browsewithcaret':                    false
   'ignore_ctrl_alt':                    (Services.appinfo.OS == 'WINNT')
   'prevent_autofocus_modes':            'normal'
   'config_file_directory':              ''
   'blur_timeout':                       50
-  'hints_timeout':                      200
-  'hints_sleep':                        15
+  'refocus_timeout':                    100
   'smoothScroll.lines.spring-constant': '1000'
   'smoothScroll.pages.spring-constant': '2500'
   'smoothScroll.other.spring-constant': '2500'
   'scroll.reset_timeout':               1000
+  'scroll.repeat_timeout':              65
+  'scroll.horizontal_boost':            6
+  'scroll.vertical_boost':              3
   'scroll.full_page_adjustment':        40
   'scroll.half_page_adjustment':        20
-  'scroll.last_position_mark':          '`'
+  'scroll.last_position_mark':          "'"
+  'scroll.last_find_mark':              '/'
   'pattern_selector':                   ':-moz-any(
                                            a, button, input[type="button"]
                                          ):not([role="menu"]):not([role="tab"])'
   'pattern_attrs':                      'rel  role  data-tooltip  aria-label'
-  'hints_peek_through':                 '<s->'
-  'hints_toggle_in_tab':                '<c-'
-  'hints_toggle_in_background':         '<a-'
+  'hints.matched_timeout':              200
+  'hints.sleep':                        15
+  'hints.match_text':                   true
+  'hints.peek_through':                 '<c-s->'
+  'hints.toggle_in_tab':                '<c-'
+  'hints.toggle_in_background':         '<a-'
   'activatable_element_keys':           '<enter>'
   'adjustable_element_keys':            '<arrowup>  <arrowdown>  <arrowleft>
                                          <arrowright>  <space>  <enter>'

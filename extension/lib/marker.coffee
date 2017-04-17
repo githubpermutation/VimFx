@@ -26,24 +26,27 @@ utils = require('./utils')
 class Marker
   # `@wrapper` is a stand-in for the element that the marker represents. See
   # `MarkerContainer::injectHints` for more information.
-  constructor: (@wrapper, @document, {@isComplementary}) ->
-    @elementShape  = @wrapper.shape
+  constructor: (options) ->
+    {
+      @wrapper, @document, @viewport, @zoom = 1, @isComplementary = false
+    } = options
+    @elementShape = @wrapper.shape
     @markerElement = utils.createBox(@document, 'marker')
     @markerElement.setAttribute('data-type', @wrapper.type)
-    @weight = @elementShape.area
-    @width = 0
-    @height = 0
+    @weight = @wrapper.combinedArea
     @hint = ''
-    @hintIndex = 0
+    @originalHint = null
+    @text = @wrapper.text?.toLowerCase() ? ''
     @visible = true
-    @zoom = 1
-    @viewport = null
+    @highlighted = false
     @position = null
-    @originalPosition = null
+    @dx = 0
+    @dy = 0
 
   reset: ->
-    @setHint(@hint)
+    @setHint(@originalHint)
     @show()
+    @refreshPosition()
 
   show: -> @setVisibility(true)
   hide: -> @setVisibility(false)
@@ -53,35 +56,58 @@ class Marker
 
   # To be called when the marker has been both assigned a hint and inserted
   # into the DOM, and thus gotten a width and height.
-  setPosition: (@viewport, @zoom) ->
+  setPosition: ->
     {
-      markerElement: {clientWidth, clientHeight}
-      elementShape: {nonCoveredPoint: {x: left, y: top, offset}}
-    } = this
+      textOffset, isBlock
+      width: elementWidth
+      nonCoveredPoint: {x: left, y: top, offset}
+    } = @elementShape
 
-    @width  = clientWidth  / @zoom
-    @height = clientHeight / @zoom
+    rect = @markerElement.getBoundingClientRect()
 
-    # Center the marker vertically on the non-covered point.
-    top -= Math.ceil(@height / 2)
+    # Take movements into account.
+    left += @dx
+    top  += @dy
 
     # Make the position relative to the top frame.
     left += offset.left
     top  += offset.top
 
-    @originalPosition = {left, top}
-    @moveTo(left, top)
-
-  moveTo: (left, top) ->
-    # Make sure that the marker stays within the viewport.
-    left = Math.min(left, @viewport.right  - @width)
-    top  = Math.min(top,  @viewport.bottom - @height)
-    left = Math.max(left, @viewport.left)
-    top  = Math.max(top,  @viewport.top)
-
     # Take the current zoom into account.
-    left = Math.round(left * @zoom)
-    top  = Math.round(top  * @zoom)
+    left *= @zoom
+    top  *= @zoom
+
+    if textOffset?
+      # Move the marker just to the left of the text of its element, unless the
+      # element is a “block” (see `getElementShape` in markable-elements.coffee)
+      # and the marker wouldn’t cover text.
+      unless isBlock and rect.width < textOffset
+        left += textOffset * @zoom - rect.width
+    else
+      # Otherwise make sure that it doesn’t flow outside the right side of its
+      # element. This is to avoid the following situation (where `+` is a small
+      # button, `Link text` is a (larger) link and `DAG` and `E` are the hints
+      # placed on top of them.) This makes it clearer which hint does what.
+      # Example site: Hackernews.
+      #
+      #     z-layer   before       after
+      #     bottom    +Link text     +Link text
+      #     middle    DAG          DAG
+      #     top       E              E
+      left -= Math.max(0, rect.width - elementWidth * @zoom)
+
+    # Center the marker vertically on the non-covered point.
+    top -= Math.round(rect.height / 2)
+
+    # Make sure that the marker stays within the viewport.
+    left = Math.min(left, @zoom * @viewport.right  - rect.width)
+    top  = Math.min(top,  @zoom * @viewport.bottom - rect.height)
+    left = Math.max(left, @zoom * @viewport.left)
+    top  = Math.max(top,  @zoom * @viewport.top)
+
+    # Use whole numbers for more deterministic positioning.
+    left = Math.round(left)
+    top  = Math.round(top)
 
     # The positioning is absolute.
     @markerElement.style.left = "#{left}px"
@@ -89,39 +115,39 @@ class Marker
 
     # For quick access.
     @position = {
-      left, right: left + @width,
-      top, bottom: top + @height,
+      left, right: Math.round(left + rect.width)
+      top, bottom: Math.round(top + rect.height)
     }
 
-  updatePosition: (dx, dy) ->
-    @moveTo(@originalPosition.left + dx, @originalPosition.top + dy)
+  updatePosition: (@dx, @dy) ->
+    @setPosition()
+
+  refreshPosition: ->
+    @setPosition()
 
   setHint: (@hint) ->
-    @hintIndex = 0
+    @originalHint ?= @hint
     @markerElement.textContent = ''
     fragment = @document.createDocumentFragment()
     utils.createBox(@document, 'marker-char', fragment, char) for char in @hint
     @markerElement.appendChild(fragment)
 
-  matchHintChar: (char) ->
-    if char == @hint[@hintIndex]
-      @toggleLastHintChar(true)
-      @hintIndex += 1
-      return true
-    return false
+  matchHint: (hint) ->
+    return @hint.startsWith(hint)
 
-  deleteHintChar: ->
-    if @hintIndex > 0
-      @hintIndex -= 1
-      @toggleLastHintChar(false)
+  matchText: (strings) ->
+    return strings.every((string) => @text.includes(string))
 
-  toggleLastHintChar: (visible) ->
-    @markerElement.children[@hintIndex]
-      .classList.toggle('marker-char--matched', visible)
-
-  isMatched: -> (@hintIndex == @hint.length)
+  markMatchedPart: (hint) ->
+    matchEnd = if @matchHint(hint) then hint.length else 0
+    for child, index in @markerElement.children
+      child.classList.toggle('marker-char--matched', index < matchEnd)
+    return
 
   markMatched: (matched) ->
     @markerElement.classList.toggle('marker--matched', matched)
+
+  markHighlighted: (@highlighted) ->
+    @markerElement.classList.toggle('marker--highlighted', @highlighted)
 
 module.exports = Marker

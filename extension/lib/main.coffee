@@ -31,7 +31,7 @@ messageManager = require('./message-manager')
 migrations = require('./migrations')
 modes = require('./modes')
 options = require('./options')
-parsePref = require('./parse-prefs')
+{parsePref} = require('./parse-prefs')
 prefs = require('./prefs')
 UIEventManager = require('./events')
 utils = require('./utils')
@@ -96,7 +96,17 @@ module.exports = (data, reason) ->
   # their 'loadConfig' code manually.
   config.load(vimfx)
   vimfx.on('shutdown', -> messageManager.send('unloadConfig'))
+
+  # Since VimFx has its own Caret mode, it doesn’t make much sense having
+  # Firefox’s Caret mode always own, so make sure that it is disabled (or
+  # enabled if the user has chosen to explicitly have it always on.)
+  vimfx.resetCaretBrowsing()
+
   module.onShutdown(->
+    # Make sure that users are not left with Firefox’s own Caret mode
+    # accidentally enabled.
+    vimfx.resetCaretBrowsing()
+
     # Make sure to run the below lines in this order. The second line results in
     # removing all message listeners in frame scripts, including the one for
     # 'unloadConfig' (see above).
@@ -138,10 +148,12 @@ module.exports = (data, reason) ->
   messageManager.load("#{ADDON_PATH}/content/bootstrap-frame-#{BUILD_TIME}.js")
 
   # @if TESTS
-  test(vimfx)
-  runFrameTests = true
+  runTests = true
   messageManager.listen('runTests', (data, callback) ->
-    callback(runFrameTests)
-    runFrameTests = false
+    # Running the regular tests inside this callback means that there will be a
+    # `window` available for tests, if they need one.
+    test(vimfx) if runTests
+    callback(runTests)
+    runTests = false
   )
   # @endif

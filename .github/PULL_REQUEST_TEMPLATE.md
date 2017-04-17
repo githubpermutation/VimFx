@@ -1,6 +1,11 @@
+<!--
 Thanks for your contribution!
 
-To get your pull request merged faster, check this out:
+Submitting a translation? Nice! Go ahead and hit that “Create pull request” button!
+
+Doing something else? To get your changes merged faster, check this out:
 https://github.com/akhodakivskiy/VimFx/blob/master/documentation/CONTRIBUTING-CODE.md
 
-Replace all of this with something more useful when done :)
+Also remember that new features are not accepted. See issue #860:
+https://github.com/akhodakivskiy/VimFx/issues/860
+-->
